@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# capacitor 生成的 android 工程(CI 里构建,不入库)
+android/
+
+# build outputs
+*.apk
+*.aab
+
+# misc
+*.log
+.DS_Store
+Thumbs.db
+
+# local tooling
+.claude/

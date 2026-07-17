@@ -1,0 +1,11 @@
+{
+  "appId": "com.lifelog.app",
+  "appName": "LIFELOG",
+  "webDir": "web",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

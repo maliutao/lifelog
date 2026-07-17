@@ -1,0 +1,760 @@
+/* ============================================================
+   LIFELOG · 生活日志  -  纯前端 / localStorage
+   数据模型:
+     equipment: { id, name, muscle, mode:'weighted'|'bodyweight', lastSets:[{reps,weight}]|null }
+     entries:   { id, date, equipmentId, mode, sets:[{reps,weight}], createdAt }
+     practice:  { id, date, minutes, note, createdAt }
+   ============================================================ */
+
+const KEY = 'liftlog.db.v1';
+let DB = load();
+migrate();
+const state = { tab:'record', editor:null, practiceEditor:null, popover:false, libEdit:null, libEditVals:null, newEq:{muscle:'胸', mode:'weighted'}, range:{kind:'all'}, reportsView:'fitness' };
+
+/* ---------- storage ---------- */
+function load(){
+  try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && Array.isArray(d.equipment)) return d; }
+  catch {}
+  return { equipment: [], entries: [], practice: [] };
+}
+function save(){ localStorage.setItem(KEY, JSON.stringify(DB)); }
+/* 旧版数据迁移:单组 sets/reps/weight -> 多组;补 practice 数组 */
+function migrate(){
+  DB.equipment.forEach(e=>{ if(!e.mode) e.mode='weighted'; if(!e.lastSets) e.lastSets=null; });
+  DB.entries.forEach(e=>{
+    if(!Array.isArray(e.sets)){
+      const n = e.sets||0, reps = e.reps||0, weight = e.weight||0;
+      e.sets = Array.from({length:n}, ()=>({reps, weight}));
+      delete e.reps; delete e.weight;
+    }
+    if(!e.mode){ const q=eq(e.equipmentId); e.mode = q?.mode || 'weighted'; }
+  });
+  if(!Array.isArray(DB.practice)) DB.practice = [];
+}
+
+/* ---------- muscle groups ---------- */
+const MUSCLE = ['胸','背','肩','肱二头','肱三头','前臂','腿','臀','小腿','核心','有氧','其他'];
+const GROUP_COLORS = {
+  '胸':'#c8ff3a','背':'#00e5ff','肩':'#ff7a3c','肱二头':'#ff3c6e','肱三头':'#b388ff',
+  '前臂':'#ffd23c','腿':'#3cffa0','臀':'#ff3cc8','小腿':'#3cb8ff','核心':'#ffe23c',
+  '有氧':'#9aa0a6','其他':'#6b7280'
+};
+const groupColor = g => GROUP_COLORS[g] || '#c8ff3a';
+
+const SAMPLE = [
+  {name:'杠铃卧推', muscle:'胸', mode:'weighted'}, {name:'哑铃飞鸟', muscle:'胸', mode:'weighted'},
+  {name:'胸部推举机', muscle:'胸', mode:'weighted'}, {name:'高位下拉', muscle:'背', mode:'weighted'},
+  {name:'低位下拉', muscle:'背', mode:'weighted'}, {name:'罗马尼亚硬拉', muscle:'背', mode:'weighted'},
+  {name:'杠铃划船', muscle:'背', mode:'weighted'}, {name:'杠铃深蹲', muscle:'腿', mode:'weighted'},
+  {name:'腿举', muscle:'腿', mode:'weighted'}, {name:'哑铃肩推', muscle:'肩', mode:'weighted'},
+  {name:'哑铃弯举', muscle:'肱二头', mode:'weighted'}, {name:'绳索下压', muscle:'肱三头', mode:'weighted'},
+  {name:'俯卧撑', muscle:'胸', mode:'bodyweight'}, {name:'双杠臂屈伸', muscle:'肱三头', mode:'bodyweight'},
+];
+
+/* ---------- utils ---------- */
+const WD = ['日','一','二','三','四','五','六'];
+const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const todayStr = () => fmt(new Date());
+const fmtShort = s => s.slice(5).replace('-','.');
+const weekdayStr = s => '周' + WD[new Date(s+'T00:00:00').getDay()];
+const fmtNum = n => Math.round(n).toLocaleString();
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const eq = id => DB.equipment.find(e => e.id === id);
+const vol = e => (!e || !Array.isArray(e.sets) || e.mode==='bodyweight') ? 0 : e.sets.reduce((s,st)=>s + (st.reps||0)*(st.weight||0), 0);
+const totalReps = e => Array.isArray(e?.sets) ? e.sets.reduce((s,st)=>s+(st.reps||0),0) : 0;
+const totalSets = e => Array.isArray(e?.sets) ? e.sets.length : 0;
+function startOfWeek(d){ const x = new Date(d); x.setHours(0,0,0,0); const day = (x.getDay()+6)%7; x.setDate(x.getDate()-day); return x; }
+
+/* ---------- fitness aggregates ---------- */
+function sumVolume(fn){ return DB.entries.filter(fn).reduce((s,e)=>s+vol(e),0); }
+function todayEntries(){ return DB.entries.filter(e=>e.date===todayStr()).sort((a,b)=>a.createdAt-b.createdAt); }
+function thisWeekRange(){ const s = startOfWeek(new Date(todayStr()+'T00:00:00')); const e = new Date(s); e.setDate(e.getDate()+6); return [s,e]; }
+function periodVolume(kind){
+  if(kind==='today') return sumVolume(e=>e.date===todayStr());
+  if(kind==='week'){ const [s,e]=thisWeekRange(); return sumVolume(en=>{const d=new Date(en.date+'T00:00:00'); return d>=s&&d<=e;}); }
+  const n=new Date(), s=new Date(n.getFullYear(),n.getMonth(),1), e=new Date(n.getFullYear(),n.getMonth()+1,0);
+  return sumVolume(en=>{const d=new Date(en.date+'T00:00:00'); return d>=s&&d<=e;});
+}
+function dailySeries(n){
+  const out=[]; const t=new Date(todayStr()+'T00:00:00');
+  for(let i=n-1;i>=0;i--){ const d=new Date(t); d.setDate(d.getDate()-i); const s=fmt(d); out.push({label:fmtShort(s), value:sumVolume(e=>e.date===s)}); }
+  return out;
+}
+/* range filter for fitness breakdowns (按器械 / 按部位) */
+function inRange(dateStr){
+  const r=state.range; const d=new Date(dateStr+'T00:00:00');
+  if(r.kind==='all') return true;
+  if(r.kind==='custom'){ if(!r.from||!r.to) return true; const f=new Date(r.from+'T00:00:00'); const t=new Date(r.to+'T00:00:00'); return d>=f&&d<=t; }
+  const days=parseInt(r.kind); const cut=new Date(todayStr()+'T00:00:00'); cut.setDate(cut.getDate()-days+1); return d>=cut;
+}
+function rangeLabel(){
+  const r=state.range;
+  if(r.kind==='all') return '全部时间';
+  if(r.kind==='custom') return `${r.from||'?'} ~ ${r.to||'?'}`;
+  return `近 ${r.kind} 天`;
+}
+function rangeBar(){
+  const r=state.range;
+  const opts=[['all','全部'],['30','近30天'],['90','近90天'],['365','近1年'],['custom','自定义']];
+  return `<div class="range-bar">${opts.map(o=>`<button class="chip ${r.kind===o[0]?'on':''}" data-act="range" data-r="${o[0]}">${o[1]}</button>`).join('')}</div>`
+    + (r.kind==='custom'?`<div class="range-custom"><input type="date" id="r-from" value="${r.from||todayStr()}"><span>-</span><input type="date" id="r-to" value="${r.to||todayStr()}"></div>`:'');
+}
+function byEquipmentKg(){
+  const m={}; DB.entries.filter(e=>e.mode!=='bodyweight' && inRange(e.date)).forEach(e=>{ m[e.equipmentId]=(m[e.equipmentId]||0)+vol(e); });
+  return Object.entries(m).map(([id,v])=>({label:eq(id)?.name||'已删除', value:v})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
+}
+function byEquipmentReps(){
+  const m={}; DB.entries.filter(e=>e.mode==='bodyweight' && inRange(e.date)).forEach(e=>{ m[e.equipmentId]=(m[e.equipmentId]||0)+totalReps(e); });
+  return Object.entries(m).map(([id,v])=>({label:eq(id)?.name||'已删除', value:v})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
+}
+function byMuscle(){
+  const m={}; DB.entries.filter(e=>e.mode!=='bodyweight' && inRange(e.date)).forEach(e=>{ const g=eq(e.equipmentId)?.muscle||'其他'; m[g]=(m[g]||0)+vol(e); });
+  return Object.entries(m).map(([g,v])=>({label:g, value:v})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
+}
+
+/* ---------- practice aggregates ---------- */
+function todayPractice(){ return DB.practice.filter(p=>p.date===todayStr()).sort((a,b)=>a.createdAt-b.createdAt); }
+function practiceSum(fn){ return DB.practice.filter(fn).reduce((s,p)=>s+(+p.minutes||0),0); }
+function practicePeriod(kind){
+  if(kind==='today') return practiceSum(p=>p.date===todayStr());
+  if(kind==='week'){ const [s,e]=thisWeekRange(); return practiceSum(p=>{const d=new Date(p.date+'T00:00:00'); return d>=s&&d<=e;}); }
+  const n=new Date(), s=new Date(n.getFullYear(),n.getMonth(),1), e=new Date(n.getFullYear(),n.getMonth()+1,0);
+  return practiceSum(p=>{const d=new Date(p.date+'T00:00:00'); return d>=s&&d<=e;});
+}
+function practiceDailySeries(n){
+  const out=[]; const t=new Date(todayStr()+'T00:00:00');
+  for(let i=n-1;i>=0;i--){ const d=new Date(t); d.setDate(d.getDate()-i); const s=fmt(d); out.push({label:fmtShort(s), value:practiceSum(p=>p.date===s)}); }
+  return out;
+}
+function practiceStreak(){
+  const set=new Set(DB.practice.map(p=>p.date));
+  let streak=0; const d=new Date(todayStr()+'T00:00:00');
+  if(!set.has(fmt(d))) d.setDate(d.getDate()-1);
+  while(set.has(fmt(d))){ streak++; d.setDate(d.getDate()-1); }
+  return streak;
+}
+
+/* ---------- charts ---------- */
+function vbars(data, height=180){
+  const max = Math.max(1, ...data.map(d=>d.value));
+  const total = data.reduce((s,d)=>s+d.value,0);
+  if(!total) return `<div class="chart-empty">暂无数据,去记录第一条吧</div>`;
+  return `<div class="vbars" style="height:${height}px">${data.map((d,i)=>{
+    const h = (d.value/max*100).toFixed(2);
+    return `<div class="vbar-col">
+      <div class="vbar-val">${d.value?fmtNum(d.value):''}</div>
+      <div class="vbar-track"><div class="vbar" style="--h:${h}%;animation-delay:${i*35}ms"></div></div>
+      <div class="vbar-lbl">${d.label}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function hbars(data, {top=12}={}){
+  const d = data.slice(0, top);
+  const max = Math.max(1, ...d.map(x=>x.value));
+  if(!d.length || d.every(x=>!x.value)) return `<div class="chart-empty">暂无数据</div>`;
+  return `<div class="hbars">${d.map((x,i)=>{
+    const w = (x.value/max*100).toFixed(2);
+    return `<div class="hbar-row">
+      <div class="hbar-name">${esc(x.label)}</div>
+      <div class="hbar-track"><div class="hbar" style="width:${w}%;animation-delay:${i*45}ms"></div></div>
+      <div class="hbar-val">${fmtNum(x.value)}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function donut(data){
+  const total = data.reduce((s,d)=>s+d.value,0);
+  if(!total) return `<div class="chart-empty">暂无数据</div>`;
+  const r=60, c=2*Math.PI*r, cx=80, cy=80; let acc=0;
+  const segs = data.map(d=>{
+    const frac = d.value/total, dash = frac*c;
+    const seg = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${groupColor(d.label)}" stroke-width="22" stroke-dasharray="${dash} ${c-dash}" stroke-dashoffset="${-acc}" transform="rotate(-90 ${cx} ${cy})"/>`;
+    acc += dash; return seg;
+  }).join('');
+  return `<div class="donut-wrap"><svg viewBox="0 0 160 160" class="donut">${segs}
+    <text x="80" y="75" text-anchor="middle" class="donut-num">${fmtNum(total)}</text>
+    <text x="80" y="93" text-anchor="middle" class="donut-lbl">总训练量 kg</text></svg>
+    <div class="legend">${data.map(d=>`<div class="legend-item"><span class="dot" style="background:${groupColor(d.label)}"></span>${esc(d.label)}<b>${fmtNum(d.value)}</b></div>`).join('')}</div></div>`;
+}
+
+/* ---------- heatmap (generic grid, 近6月) ---------- */
+function heatColor(sets){
+  if(sets<=0) return '#171b21';
+  if(sets<=2) return 'rgba(200,255,58,.22)';
+  if(sets<=5) return 'rgba(200,255,58,.45)';
+  if(sets<=9) return 'rgba(200,255,58,.7)';
+  return 'rgba(200,255,58,.95)';
+}
+function minColor(m){
+  if(m<=0) return '#171b21';
+  if(m<=15) return 'rgba(200,255,58,.22)';
+  if(m<=30) return 'rgba(200,255,58,.45)';
+  if(m<=45) return 'rgba(200,255,58,.7)';
+  return 'rgba(200,255,58,.95)';
+}
+function heatGrid({valueFn, colorFn, titleFn}){
+  const weeks=27, cell=13, gap=3, labelW=22, topH=16;
+  const today=new Date(todayStr()+'T00:00:00');
+  const endMon=startOfWeek(today);
+  const startMon=new Date(endMon); startMon.setDate(startMon.getDate()-(weeks-1)*7);
+  const w=labelW+weeks*(cell+gap), h=topH+7*(cell+gap);
+  const monthNames=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  let rects='', monthLabels='', prevMonth=-1;
+  for(let d=0; d<weeks*7; d++){
+    const date=new Date(startMon); date.setDate(date.getDate()+d);
+    const ds=fmt(date);
+    const col=Math.floor(d/7), row=d%7;
+    const x=labelW+col*(cell+gap), y=topH+row*(cell+gap);
+    if(row===0){ const m=date.getMonth(); if(m!==prevMonth){ monthLabels+=`<text x="${x}" y="11" class="heat-month">${monthNames[m]}</text>`; prevMonth=m; } }
+    if(date>today){ rects+=`<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" fill="#0c0e12"/>`; continue; }
+    const v=valueFn(ds);
+    const title=titleFn(ds, v);
+    rects+=`<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" fill="${colorFn(v)}" data-act="heat" data-info="${esc(title)}"><title>${esc(title)}</title></rect>`;
+  }
+  const wd=['一','','三','','五','','日']; let wdText='';
+  for(let i=0;i<7;i++){ if(wd[i]) wdText+=`<text x="${labelW-4}" y="${topH+i*(cell+gap)+cell-2}" text-anchor="end" class="heat-wd">${wd[i]}</text>`; }
+  return `<div class="heat-scroll"><svg viewBox="0 0 ${w} ${h}" class="heat">${monthLabels}${wdText}${rects}</svg></div>
+    <div class="heat-legend"><span>少</span><i style="background:#171b21"></i><i style="background:rgba(200,255,58,.22)"></i><i style="background:rgba(200,255,58,.45)"></i><i style="background:rgba(200,255,58,.7)"></i><i style="background:rgba(200,255,58,.95)"></i><span>多</span><span class="heat-cap" id="heat-cap">点方块查看当天</span></div>`;
+}
+function fitnessHeatmap(){
+  const map={};
+  DB.entries.forEach(e=>{ if(!map[e.date]) map[e.date]={sets:0,reps:0,vol:0}; map[e.date].sets+=totalSets(e); map[e.date].reps+=totalReps(e); map[e.date].vol+=vol(e); });
+  return heatGrid({
+    valueFn: ds => map[ds]?.sets||0,
+    colorFn: heatColor,
+    titleFn: (ds) => { const i=map[ds]; return i ? `${ds} · ${i.sets} 组 · ${i.reps} 次${i.vol>0?` · ${fmtNum(i.vol)} kg`:''}` : `${ds} · 休息`; }
+  });
+}
+function practiceHeatmap(){
+  const map={};
+  DB.practice.forEach(p=>{ map[p.date]=(map[p.date]||0)+(+p.minutes||0); });
+  return heatGrid({
+    valueFn: ds => map[ds]||0,
+    colorFn: minColor,
+    titleFn: (ds,v) => v>0 ? `${ds} · ${v} 分钟` : `${ds} · 休息`
+  });
+}
+
+/* ---------- shell ---------- */
+function header(){
+  return `<header class="top">
+    <div class="brand"><svg class="brand-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="9" width="3" height="6" rx="1"/><rect x="4" y="7" width="2.4" height="10" rx="1"/><line x1="6.4" y1="12" x2="17.6" y2="12"/><rect x="17.6" y="7" width="2.4" height="10" rx="1"/><rect x="20" y="9" width="3" height="6" rx="1"/></svg>LIFELOG<span class="brand-sub">生活日志</span></div>
+    <div class="data-menu">
+      <button class="icon-btn" data-act="popover">数据</button>
+      ${state.popover?`<div class="popover">
+        <button data-act="export">导出 JSON 备份</button>
+        <button data-act="import">导入 JSON</button>
+        <button data-act="clear" class="danger">清空所有数据</button>
+      </div>`:''}
+    </div>
+  </header>`;
+}
+function navbar(){
+  const items = [
+    ['record','记录','<path d="M12 5v14M5 12h14"/>'],
+    ['library','器械库','<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'],
+    ['reports','报表','<line x1="6" y1="20" x2="6" y2="13"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="10"/>'],
+    ['history','历史','<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'],
+  ];
+  return `<nav class="navbar">${items.map(it=>`
+    <button class="navitem ${state.tab===it[0]?'on':''}" data-act="tab" data-tab="${it[0]}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${it[2]}</svg>
+      <span>${it[1]}</span>
+    </button>`).join('')}</nav>`;
+}
+function view(){
+  if(state.tab==='record') return renderRecord();
+  if(state.tab==='library') return renderLibrary();
+  if(state.tab==='reports') return renderReports();
+  return renderHistory();
+}
+function render(){
+  document.getElementById('app').innerHTML = header() + `<main class="container">${view()}</main>` + navbar();
+}
+
+/* ---------- record view ---------- */
+function statCard(label,val,unit){ return `<div class="stat"><div class="stat-val">${val}<span>${unit}</span></div><div class="stat-lbl">${label}</div></div>`; }
+function entrySummary(e){
+  const reps = e.sets.map(s=>s.reps||0);
+  const sets = e.sets.length;
+  const repsTotal = reps.reduce((a,b)=>a+b,0);
+  if(e.mode==='bodyweight'){
+    return {meta:`${reps.join('/')} 次 · ${sets} 组`, vol:String(repsTotal), volUnit:'次'};
+  }
+  const weights = e.sets.map(s=>s.weight||0);
+  const wInfo = weights.every(w=>w===weights[0]) ? `${weights[0]} kg` : `${Math.min(...weights)}–${Math.max(...weights)} kg`;
+  return {meta:`${reps.join('/')} 次 @ ${wInfo} · ${sets} 组`, vol:fmtNum(vol(e)), volUnit:'kg'};
+}
+function entryRow(e){
+  const q = eq(e.equipmentId);
+  const s = entrySummary(e);
+  return `<div class="entry">
+    <div class="entry-main">
+      <div class="entry-name">${esc(q?.name||'已删除')}<span class="tag" style="--c:${groupColor(q?.muscle||'其他')}">${esc(q?.muscle||'其他')}</span>${e.mode==='bodyweight'?'<span class="tag" style="--c:#9aa0a6">自重</span>':''}</div>
+      <div class="entry-meta">${s.meta}</div>
+    </div>
+    <div class="entry-vol">${s.vol}<span>${s.volUnit}</span></div>
+    <div class="entry-act">
+      <button data-act="edit" data-id="${e.id}">改</button>
+      <button data-act="del-entry" data-id="${e.id}">删</button>
+    </div>
+  </div>`;
+}
+function practiceRow(p){
+  return `<div class="entry">
+    <div class="entry-main">
+      <div class="entry-name">吉他练习<span class="tag" style="--c:#3cb8ff">练习</span></div>
+      <div class="entry-meta">${p.note?esc(p.note):'今日练习'}</div>
+    </div>
+    <div class="entry-vol">${p.minutes}<span>分</span></div>
+    <div class="entry-act">
+      <button data-act="edit-practice" data-id="${p.id}">改</button>
+      <button data-act="del-practice" data-id="${p.id}">删</button>
+    </div>
+  </div>`;
+}
+function renderRecord(){
+  const te = todayEntries();
+  const tVol = te.reduce((s,e)=>s+vol(e),0);
+  const tSets = te.reduce((s,e)=>s+totalSets(e),0);
+  const tReps = te.reduce((s,e)=>s+totalReps(e),0);
+  const tp = todayPractice();
+  const tpMin = tp.reduce((s,p)=>s+(+p.minutes||0),0);
+  const dstr = todayStr();
+  return `
+  <section class="reveal">
+    <div class="day-head">
+      <div>
+        <div class="day-date">${fmtShort(dstr)}<span class="wd">${weekdayStr(dstr)}</span></div>
+        <div class="day-title">今日</div>
+      </div>
+    </div>
+    <div class="sub-head"><span class="sub-title">训练</span><button class="sec-add" data-act="new">+ 记录器械</button></div>
+    <div class="stat-row">
+      ${statCard('训练量', fmtNum(tVol), 'kg')}
+      ${statCard('总组数', tSets, '组')}
+      ${statCard('总次数', tReps, '次')}
+    </div>
+    ${te.length ? `<div class="entry-list">${te.map(entryRow).join('')}</div>` : `<div class="empty">还没有训练记录,点「+ 记录器械」开始</div>`}
+  </section>
+  <section class="reveal">
+    <div class="sub-head"><span class="sub-title">练习<em>${tpMin} 分钟</em></span><button class="sec-add" data-act="new-practice">+ 记录</button></div>
+    ${tp.length ? `<div class="entry-list">${tp.map(practiceRow).join('')}</div>` : `<div class="empty">还没有练习记录,点「+ 记录」开始</div>`}
+  </section>`;
+}
+
+/* ---------- library view ---------- */
+function eqRow(e, editing){
+  if(editing){
+    const v = state.libEditVals || {muscle:e.muscle, mode:e.mode};
+    return `<div class="eq editing">
+      <input id="edit-name-${e.id}" value="${esc(e.name)}">
+      <div class="form-row"><span class="form-label">部位</span>
+        <div class="pills">${MUSCLE.map(m=>`<button class="chip ${v.muscle===m?'on':''}" data-act="edit-muscle" data-m="${m}">${m}</button>`).join('')}</div>
+      </div>
+      <div class="form-row"><span class="form-label">类型</span>
+        <div class="seg">
+          <button class="chip ${v.mode==='weighted'?'on':''}" data-act="edit-mode" data-m="weighted">有重量</button>
+          <button class="chip ${v.mode==='bodyweight'?'on':''}" data-act="edit-mode" data-m="bodyweight">自重</button>
+        </div>
+      </div>
+      <div class="edit-actions">
+        <button class="btn primary sm" data-act="save-eq" data-id="${e.id}">保存</button>
+        <button class="btn ghost sm" data-act="cancel-eq">取消</button>
+      </div>
+    </div>`;
+  }
+  return `<div class="eq">
+    <div class="eq-main"><div class="eq-name">${esc(e.name)}<span class="tag" style="--c:${groupColor(e.muscle)}">${esc(e.muscle)}</span>${e.mode==='bodyweight'?'<span class="tag" style="--c:#9aa0a6">自重</span>':''}</div></div>
+    <div class="eq-last">${e.lastSets?.length?`上次 ${e.lastSets.length} 组`:'未使用'}</div>
+    <div class="eq-act">
+      <button data-act="edit-eq" data-id="${e.id}">改</button>
+      <button data-act="del-eq" data-id="${e.id}">删</button>
+    </div>
+  </div>`;
+}
+function renderLibrary(){
+  return `
+  <section class="reveal">
+    <div class="sec-title">新增器械</div>
+    <div class="add-eq">
+      <input id="new-eq-name" placeholder="器械名称(如 胸部推举机)" autocomplete="off">
+      <div class="form-row"><span class="form-label">部位</span>
+        <div class="pills">${MUSCLE.map(m=>`<button class="chip ${state.newEq.muscle===m?'on':''}" data-act="new-muscle" data-m="${m}">${m}</button>`).join('')}</div>
+      </div>
+      <div class="form-row"><span class="form-label">类型</span>
+        <div class="seg">
+          <button class="chip ${state.newEq.mode==='weighted'?'on':''}" data-act="new-mode" data-m="weighted">有重量</button>
+          <button class="chip ${state.newEq.mode==='bodyweight'?'on':''}" data-act="new-mode" data-m="bodyweight">自重</button>
+        </div>
+      </div>
+      <button class="btn primary" data-act="add-eq" style="width:100%">添加</button>
+    </div>
+    <div class="hint">「自重」类(如俯卧撑)不记重量,按次数统计。</div>
+  </section>
+  <section class="reveal">
+    <div class="sec-title">器械库<span class="sec-sub">${DB.equipment.length} 项</span></div>
+    ${DB.equipment.length
+      ? `<div class="eq-list">${DB.equipment.map(e=>eqRow(e, state.libEdit===e.id)).join('')}</div>`
+      : `<div class="empty">还没有器械。<button class="link" data-act="load-samples">载入常用示例</button> 或 在上方添加</div>`}
+  </section>`;
+}
+
+/* ---------- reports view ---------- */
+function renderReports(){
+  const toggle = `<div class="rpt-toggle"><button class="chip ${state.reportsView==='fitness'?'on':''}" data-act="rpt-view" data-v="fitness">训练</button><button class="chip ${state.reportsView==='practice'?'on':''}" data-act="rpt-view" data-v="practice">练习</button></div>`;
+  return toggle + (state.reportsView==='practice' ? practiceReports() : fitnessReports());
+}
+function fitnessReports(){
+  const bwReps = byEquipmentReps();
+  const rl = rangeLabel();
+  return `
+  <section class="reveal">
+    <div class="stat-row">
+      ${statCard('今日', fmtNum(periodVolume('today')), 'kg')}
+      ${statCard('本周', fmtNum(periodVolume('week')), 'kg')}
+      ${statCard('本月', fmtNum(periodVolume('month')), 'kg')}
+    </div>
+  </section>
+  <section class="reveal"><div class="sec-title">近 14 天 · 每日训练量</div>${vbars(dailySeries(14))}</section>
+  <section class="reveal"><div class="sec-title">训练热力图 · 近 6 月<span class="sec-sub">颜色 = 当天组数</span></div>${fitnessHeatmap()}</section>
+  <section class="reveal">
+    <div class="sec-title">区间统计<span class="sec-sub">${rl}</span></div>
+    ${rangeBar()}
+  </section>
+  <section class="reveal"><div class="sec-title">按器械 · 训练量 (kg)<span class="sec-sub">${rl}</span></div>${hbars(byEquipmentKg())}</section>
+  ${bwReps.length?`<section class="reveal"><div class="sec-title">按器械 · 自重次数<span class="sec-sub">${rl}</span></div>${hbars(bwReps)}</section>`:''}
+  <section class="reveal"><div class="sec-title">按部位 · 训练量分布 (kg)<span class="sec-sub">${rl}</span></div>${donut(byMuscle())}</section>`;
+}
+function practiceReports(){
+  const totalDays = new Set(DB.practice.map(p=>p.date)).size;
+  const totalMin = DB.practice.reduce((s,p)=>s+(+p.minutes||0),0);
+  return `
+  <section class="reveal">
+    <div class="stat-row">
+      ${statCard('今日', practicePeriod('today'), '分')}
+      ${statCard('本周', practicePeriod('week'), '分')}
+      ${statCard('本月', practicePeriod('month'), '分')}
+    </div>
+  </section>
+  <section class="reveal">
+    <div class="stat-row">
+      ${statCard('连续打卡', practiceStreak(), '天')}
+      ${statCard('总天数', totalDays, '天')}
+      ${statCard('总时长', fmtNum(totalMin), '分')}
+    </div>
+  </section>
+  <section class="reveal"><div class="sec-title">近 14 天 · 每日练习时长</div>${vbars(practiceDailySeries(14))}</section>
+  <section class="reveal"><div class="sec-title">练习热力图 · 近 6 月<span class="sec-sub">颜色 = 当天分钟</span></div>${practiceHeatmap()}</section>`;
+}
+
+/* ---------- history view ---------- */
+function renderHistory(){
+  if(!DB.entries.length && !DB.practice.length) return `<section class="reveal"><div class="empty">还没有历史记录</div></section>`;
+  const byDate = {};
+  DB.entries.forEach(e => { (byDate[e.date] ||= {fit:[], prac:[]}).fit.push(e); });
+  DB.practice.forEach(p => { (byDate[p.date] ||= {fit:[], prac:[]}).prac.push(p); });
+  return Object.keys(byDate).sort((a,b)=>b.localeCompare(a)).map(d=>{
+    const {fit, prac} = byDate[d];
+    const es = fit.sort((a,b)=>a.createdAt-b.createdAt);
+    const ps = prac.sort((a,b)=>a.createdAt-b.createdAt);
+    const v = es.reduce((s,e)=>s+vol(e),0);
+    const sets = es.reduce((s,e)=>s+totalSets(e),0);
+    const reps = es.reduce((s,e)=>s+totalReps(e),0);
+    const pmin = ps.reduce((s,p)=>s+(+p.minutes||0),0);
+    const fitStr = es.length ? `${es.length} 器械 · ${sets} 组 · ${reps} 次${v>0?` · ${fmtNum(v)} kg`:''}` : '';
+    const pracStr = ps.length ? `练习 ${pmin} 分` : '';
+    return `<section class="reveal">
+      <div class="day-head sm"><div>
+        <div class="day-date">${fmtShort(d)}<span class="wd">${weekdayStr(d)}</span></div>
+        <div class="day-sub">${[fitStr, pracStr].filter(Boolean).join(' · ')}</div>
+      </div></div>
+      <div class="entry-list">${es.map(entryRow).join('')}${ps.length?`<div class="day-divider">练习</div>${ps.map(practiceRow).join('')}`:''}</div>
+    </section>`;
+  }).join('');
+}
+
+/* ---------- fitness editor modal ---------- */
+function defaultRows(q){
+  if(q.lastSets && q.lastSets.length) return q.lastSets.map(s=>({reps:s.reps, weight:s.weight}));
+  const w = q.mode==='bodyweight' ? null : 30;
+  return Array.from({length:4}, ()=>({reps:12, weight:w}));
+}
+function openEditorNew(){ state.editor = {mode:'new', equipmentId:null, date:todayStr(), eqMode:'weighted', rows:null}; state.practiceEditor=null; renderModal(); }
+function openEditorEdit(id){
+  const e = DB.entries.find(x=>x.id===id); if(!e) return;
+  state.editor = {mode:'edit', entryId:id, equipmentId:e.equipmentId, date:e.date, eqMode:e.mode, rows:e.sets.map(s=>({reps:s.reps, weight:s.weight}))};
+  state.practiceEditor=null;
+  renderModal();
+}
+function closeEditor(){ state.editor = null; state.practiceEditor = null; const m = document.getElementById('modal'); if(m){ m.innerHTML=''; m.classList.remove('open'); } }
+
+function setStepper(field, i, val, unit){
+  return `<div class="set-step">
+    <button class="ss-btn" data-act="rstep" data-field="${field}" data-i="${i}" data-delta="-1">−</button>
+    <input class="set-val" id="r-${field}-${i}" type="number" inputmode="decimal" value="${val}" data-field="${field}" data-i="${i}">
+    <span class="ss-unit">${unit}</span>
+    <button class="ss-btn" data-act="rstep" data-field="${field}" data-i="${i}" data-delta="1">+</button>
+  </div>`;
+}
+function updatePreview(){
+  const ed = state.editor; if(!ed) return;
+  const p = document.getElementById('ed-preview'); if(!p || !ed.rows) return;
+  const done = ed.rows.filter(r=>r.reps>0);
+  const sets = done.length;
+  const reps = done.reduce((s,r)=>s+(+r.reps||0),0);
+  if(ed.eqMode==='bodyweight'){
+    p.innerHTML = `${sets} <span>组</span> · ${reps} <span>次</span>`;
+  } else {
+    const kg = done.reduce((s,r)=>s+(+r.reps||0)*(+r.weight||0),0);
+    p.innerHTML = `${sets} <span>组</span> · ${reps} <span>次</span> · <b>${fmtNum(kg)} kg</b>`;
+  }
+}
+function renderSets(){
+  const ed = state.editor; const cont = document.getElementById('sets-list');
+  if(!cont || !ed || !ed.rows){ if(cont) cont.innerHTML=''; return; }
+  cont.innerHTML = ed.rows.map((r,i)=>`
+    <div class="set-row">
+      <div class="set-no">${i+1}</div>
+      ${setStepper('reps', i, r.reps, '次')}
+      ${ed.eqMode==='bodyweight' ? '' : setStepper('weight', i, r.weight, 'kg')}
+      <button class="set-del" data-act="del-set" data-i="${i}" title="删除本组">✕</button>
+    </div>`).join('');
+  updatePreview();
+}
+function rowStep(i, field, delta){
+  const r = state.editor.rows[i]; if(!r) return;
+  if(field==='reps') r.reps = Math.max(0, (+r.reps||0) + delta);
+  else r.weight = Math.max(0, Math.round(((+r.weight||0) + delta*2.5)*10)/10);
+  const el = document.getElementById(`r-${field}-${i}`); if(el) el.value = r[field];
+  updatePreview();
+}
+function addSet(){
+  const ed = state.editor; const last = ed.rows[ed.rows.length-1];
+  ed.rows.push({ reps:12, weight: ed.eqMode==='bodyweight' ? null : (last?.weight ?? 30) });
+  renderSets();
+}
+function delSet(i){ state.editor.rows.splice(i,1); renderSets(); }
+
+function renderModal(){
+  const ed = state.editor; const wrap = document.getElementById('modal');
+  if(!ed){ wrap.innerHTML=''; wrap.classList.remove('open'); return; }
+  const q = ed.equipmentId ? eq(ed.equipmentId) : null;
+  let body;
+  if(ed.mode==='new' && !q){
+    const list = DB.equipment.length ? DB.equipment.map(e=>`
+      <button class="pick-item" data-act="pick-eq" data-id="${e.id}" data-name="${esc(e.name)}">
+        <span class="pick-name">${esc(e.name)} ${e.mode==='bodyweight'?'<span class="tag" style="--c:#9aa0a6">自重</span>':''}</span>
+        <span class="pick-last">${e.lastSets?.length?`上次 ${e.lastSets.length} 组`:'未使用'}</span>
+      </button>`).join('')
+      : `<div class="empty-mini">还没有器械。先去 <a data-act="tab" data-tab="library">器械库</a> 添加。</div>`;
+    body = `<div class="modal-head"><span>选择器械</span><button class="x" data-act="close">×</button></div>
+      <div class="modal-body"><input class="search" data-act="search-eq" placeholder="搜索器械…" autocomplete="off">
+      <div class="pick-list">${list}</div></div>`;
+  } else {
+    body = `<div class="modal-head"><span>${ed.mode==='edit'?'编辑记录':'记录训练'}</span><button class="x" data-act="close">×</button></div>
+      <div class="modal-body">
+        <div class="ed-eq"><div>
+          <div class="ed-eq-name">${esc(q?.name||'?')} <span class="tag" style="--c:${groupColor(q?.muscle||'其他')}">${esc(q?.muscle||'其他')}</span> ${ed.eqMode==='bodyweight'?'<span class="tag" style="--c:#9aa0a6">自重</span>':''}</div>
+        </div>${ed.mode==='new'?`<button class="link" data-act="reset-eq">更换</button>`:''}</div>
+        <label class="field"><span>日期</span><input type="date" id="ed-date" value="${ed.date}"></label>
+        <div class="field-label">训练组数 · 默认 5 组,没做的组可点 ✕ 删除</div>
+        <div class="sets" id="sets-list"></div>
+        <button class="btn ghost sm add-set" data-act="add-set">+ 添加一组</button>
+        <div class="preview" id="ed-preview"></div>
+        <div class="modal-actions">
+          ${ed.mode==='edit'?`<button class="btn danger" data-act="del-in-editor">删除</button>`:''}
+          <button class="btn primary" data-act="save">保存</button>
+        </div>
+      </div>`;
+  }
+  wrap.innerHTML = `<div class="sheet">${body}</div>`;
+  wrap.classList.add('open');
+  renderSets();
+}
+function saveEditor(){
+  const ed = state.editor; if(!ed || !ed.equipmentId) return;
+  const dateEl = document.getElementById('ed-date'); if(dateEl) ed.date = dateEl.value;
+  const sets = ed.rows.filter(r=>(+r.reps||0)>0).map(r=>({ reps:Math.round(+r.reps||0), weight: ed.eqMode==='bodyweight' ? null : (+r.weight||0) }));
+  if(!sets.length){ toast('请至少完成一组(次数大于 0)'); return; }
+  const q = eq(ed.equipmentId); const mode = q?.mode || ed.eqMode;
+  if(ed.mode==='new'){
+    DB.entries.push({ id:uid(), date:ed.date, equipmentId:ed.equipmentId, mode, sets, createdAt:Date.now() });
+    if(q) q.lastSets = sets.map(s=>({reps:s.reps, weight:s.weight}));
+  } else {
+    const e = DB.entries.find(x=>x.id===ed.entryId); if(e){ e.date=ed.date; e.sets=sets; e.mode=mode; }
+  }
+  save(); closeEditor(); render(); toast('已保存');
+}
+
+/* ---------- practice editor modal ---------- */
+function openPracticeNew(){ state.practiceEditor={mode:'new', date:todayStr(), minutes:30, note:''}; state.editor=null; renderPracticeModal(); }
+function openPracticeEdit(id){
+  const p = DB.practice.find(x=>x.id===id); if(!p) return;
+  state.practiceEditor={mode:'edit', id, date:p.date, minutes:p.minutes, note:p.note||''};
+  state.editor=null;
+  renderPracticeModal();
+}
+function renderPracticeModal(){
+  const ed=state.practiceEditor; const wrap=document.getElementById('modal');
+  if(!ed){ wrap.innerHTML=''; wrap.classList.remove('open'); return; }
+  wrap.innerHTML=`<div class="sheet">
+    <div class="modal-head"><span>${ed.mode==='edit'?'编辑练习':'记录练习'}</span><button class="x" data-act="close">×</button></div>
+    <div class="modal-body">
+      <label class="field"><span>日期</span><input type="date" id="p-date" value="${ed.date}"></label>
+      <div class="field-label">练习时长(分钟)</div>
+      <div class="min-step">
+        <button class="ss-btn" data-act="pstep" data-delta="-5">−</button>
+        <input class="set-val" id="p-minutes" type="number" inputmode="numeric" value="${ed.minutes}">
+        <span class="ss-unit">分钟</span>
+        <button class="ss-btn" data-act="pstep" data-delta="5">+</button>
+      </div>
+      <label class="field" style="margin-top:14px"><span>备注</span><input type="text" id="p-note" value="${esc(ed.note)}" placeholder="可选,如 和弦练习"></label>
+      <div class="modal-actions">
+        ${ed.mode==='edit'?`<button class="btn danger" data-act="del-practice-modal">删除</button>`:''}
+        <button class="btn primary" data-act="save-practice">保存</button>
+      </div>
+    </div>
+  </div>`;
+  wrap.classList.add('open');
+}
+function savePractice(){
+  const ed=state.practiceEditor; if(!ed) return;
+  const dateEl=document.getElementById('p-date'); if(dateEl) ed.date=dateEl.value;
+  const noteEl=document.getElementById('p-note'); if(noteEl) ed.note=noteEl.value.trim();
+  const minutes=parseInt(ed.minutes)||0;
+  if(minutes<=0){ toast('请输入大于 0 的时长'); return; }
+  if(ed.mode==='new'){
+    DB.practice.push({ id:uid(), date:ed.date, minutes, note:ed.note, createdAt:Date.now() });
+  } else {
+    const p=DB.practice.find(x=>x.id===ed.id); if(p){ p.date=ed.date; p.minutes=minutes; p.note=ed.note; }
+  }
+  save(); closeEditor(); render(); toast('已保存');
+}
+function deletePractice(id, closeModal){
+  if(!confirm('删除这条练习记录?')) return;
+  DB.practice=DB.practice.filter(p=>p.id!==id);
+  save(); if(closeModal) closeEditor(); render();
+}
+
+/* ---------- library actions ---------- */
+function addEquipment(){
+  const name = document.getElementById('new-eq-name').value.trim();
+  if(!name){ toast('请输入器械名称'); return; }
+  DB.equipment.push({ id:uid(), name, muscle:state.newEq.muscle, mode:state.newEq.mode, lastSets:null });
+  save(); render();
+}
+function saveEquipmentEdit(id){
+  const name = document.getElementById(`edit-name-${id}`).value.trim();
+  const v = state.libEditVals || {};
+  const e = eq(id); if(e && name){ e.name=name; e.muscle=v.muscle||e.muscle; e.mode=v.mode||e.mode; }
+  state.libEdit = null; state.libEditVals=null; save(); render();
+}
+function deleteEquipment(id){
+  const count = DB.entries.filter(e=>e.equipmentId===id).length;
+  if(count && !confirm(`该器械有 ${count} 条训练记录,确定连同记录一起删除?`)) return;
+  if(!count && !confirm('删除这个器械?')) return;
+  DB.equipment = DB.equipment.filter(e=>e.id!==id);
+  if(count) DB.entries = DB.entries.filter(e=>e.equipmentId!==id);
+  save(); render();
+}
+function loadSamples(){
+  SAMPLE.forEach(s=>DB.equipment.push({ id:uid(), name:s.name, muscle:s.muscle, mode:s.mode, lastSets:null }));
+  save(); render(); toast('已载入示例器械');
+}
+
+/* ---------- data menu ---------- */
+function exportData(){
+  const blob = new Blob([JSON.stringify(DB,null,2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = `lifelog-${todayStr()}.json`; a.click();
+  URL.revokeObjectURL(a.href);
+}
+function importData(e){
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try { const d = JSON.parse(r.result); if(!Array.isArray(d.equipment)||!Array.isArray(d.entries)) throw 0; DB = d; migrate(); save(); state.popover=false; render(); toast('导入成功'); }
+    catch { toast('导入失败:文件格式错误'); }
+  };
+  r.readAsText(f); e.target.value='';
+}
+
+/* ---------- toast ---------- */
+function toast(msg){
+  const t = document.createElement('div'); t.className='toast'; t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.classList.add('show'),10);
+  setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>t.remove(),300); }, 1800);
+}
+
+/* ---------- events ---------- */
+function onDocClick(e){
+  const t = e.target.closest('[data-act]');
+  if(!t){
+    if(e.target.closest('.sheet')) return;
+    if(e.target.id==='modal') closeEditor();
+    return;
+  }
+  const a = t.dataset.act;
+  switch(a){
+    case 'tab': state.tab=t.dataset.tab; state.popover=false; render(); break;
+    case 'new': openEditorNew(); break;
+    case 'edit': openEditorEdit(t.dataset.id); break;
+    case 'del-entry': if(confirm('删除这条记录?')){ DB.entries=DB.entries.filter(x=>x.id!==t.dataset.id); save(); render(); } break;
+    case 'pick-eq': { const q=eq(t.dataset.id); if(q){ state.editor.equipmentId=t.dataset.id; state.editor.eqMode=q.mode||'weighted'; state.editor.rows=defaultRows(q); renderModal(); } } break;
+    case 'reset-eq': state.editor.equipmentId=null; state.editor.rows=null; renderModal(); break;
+    case 'rstep': rowStep(+t.dataset.i, t.dataset.field, parseInt(t.dataset.delta)); break;
+    case 'add-set': addSet(); break;
+    case 'del-set': delSet(+t.dataset.i); break;
+    case 'save': saveEditor(); break;
+    case 'del-in-editor': if(confirm('删除这条记录?')){ DB.entries=DB.entries.filter(x=>x.id!==state.editor.entryId); save(); closeEditor(); render(); } break;
+    case 'new-practice': openPracticeNew(); break;
+    case 'edit-practice': openPracticeEdit(t.dataset.id); break;
+    case 'del-practice': deletePractice(t.dataset.id, false); break;
+    case 'del-practice-modal': deletePractice(state.practiceEditor.id, true); break;
+    case 'pstep': { const ed=state.practiceEditor; if(ed){ ed.minutes=Math.max(0,(+ed.minutes||0)+parseInt(t.dataset.delta)); const el=document.getElementById('p-minutes'); if(el) el.value=ed.minutes; } } break;
+    case 'save-practice': savePractice(); break;
+    case 'rpt-view': state.reportsView=t.dataset.v; render(); break;
+    case 'close': closeEditor(); break;
+    case 'add-eq': addEquipment(); break;
+    case 'edit-eq': { const e=eq(t.dataset.id); if(e){ state.libEdit=t.dataset.id; state.libEditVals={muscle:e.muscle, mode:e.mode}; } render(); } break;
+    case 'cancel-eq': state.libEdit=null; state.libEditVals=null; render(); break;
+    case 'save-eq': saveEquipmentEdit(t.dataset.id); break;
+    case 'new-muscle': state.newEq.muscle=t.dataset.m; t.parentNode.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on', c===t)); break;
+    case 'new-mode': state.newEq.mode=t.dataset.m; t.parentNode.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on', c===t)); break;
+    case 'edit-muscle': if(state.libEditVals)state.libEditVals.muscle=t.dataset.m; t.parentNode.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on', c===t)); break;
+    case 'edit-mode': if(state.libEditVals)state.libEditVals.mode=t.dataset.m; t.parentNode.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on', c===t)); break;
+    case 'del-eq': deleteEquipment(t.dataset.id); break;
+    case 'load-samples': loadSamples(); break;
+    case 'popover': state.popover=!state.popover; render(); break;
+    case 'range': state.range.kind=t.dataset.r; if(t.dataset.r==='custom' && !state.range.from){ state.range.from=todayStr(); state.range.to=todayStr(); } render(); break;
+    case 'heat': { const cap=document.getElementById('heat-cap'); if(cap) cap.textContent=t.dataset.info; } break;
+    case 'export': exportData(); state.popover=false; render(); break;
+    case 'import': document.getElementById('import-file').click(); break;
+    case 'clear': if(confirm('清空所有数据?此操作不可恢复。')){ DB={equipment:[],entries:[],practice:[]}; save(); state.popover=false; render(); } break;
+  }
+}
+function onDocInput(e){
+  const pm = e.target.closest('#p-minutes');
+  if(pm && state.practiceEditor){ state.practiceEditor.minutes = parseInt(pm.value)||0; return; }
+  const sv = e.target.closest('.set-val');
+  if(sv){ const i=+sv.dataset.i, f=sv.dataset.field; const v=parseFloat(sv.value); const r=state.editor?.rows?.[i]; if(r && !isNaN(v)){ r[f]=v; updatePreview(); } return; }
+  const s = e.target.closest('[data-act="search-eq"]');
+  if(s){ const q=s.value.trim().toLowerCase(); document.querySelectorAll('#modal .pick-item').forEach(it=>{ it.style.display = it.dataset.name.toLowerCase().includes(q)?'':'none'; }); }
+}
+function onDocChange(e){
+  const d = e.target.closest('#ed-date'); if(d && state.editor){ state.editor.date = d.value; return; }
+  const rf = e.target.closest('#r-from'); if(rf){ state.range.from=rf.value; render(); return; }
+  const rt = e.target.closest('#r-to'); if(rt){ state.range.to=rt.value; render(); return; }
+}
+
+document.addEventListener('click', onDocClick);
+document.addEventListener('input', onDocInput);
+document.addEventListener('change', onDocChange);
+document.getElementById('import-file').addEventListener('change', importData);
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && (state.editor||state.practiceEditor)) closeEditor(); });
+
+render();

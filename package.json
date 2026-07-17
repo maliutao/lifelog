@@ -1,0 +1,17 @@
+{
+  "name": "lifelog",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LIFELOG 生活记录 - 健身+吉他 纯前端 App",
+  "scripts": {
+    "sync": "npx cap copy android",
+    "build:apk": "cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/core": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0"
+  }
+}
