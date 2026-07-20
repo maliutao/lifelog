@@ -4,18 +4,19 @@
      equipment: { id, name, muscle, mode:'weighted'|'bodyweight', lastSets:[{reps,weight}]|null }
      entries:   { id, date, equipmentId, mode, sets:[{reps,weight}], createdAt }
      practice:  { id, date, minutes, note, createdAt }
+     snacks:    { id, date, name, kj, note, createdAt }
    ============================================================ */
 
 const KEY = 'liftlog.db.v1';
 let DB = load();
 migrate();
-const state = { tab:'record', editor:null, practiceEditor:null, popover:false, libEdit:null, libEditVals:null, newEq:{muscle:'胸', mode:'weighted'}, range:{kind:'all'}, reportsView:'fitness' };
+const state = { tab:'record', editor:null, practiceEditor:null, snackEditor:null, popover:false, libEdit:null, libEditVals:null, newEq:{muscle:'胸', mode:'weighted'}, range:{kind:'all'}, reportsView:'fitness' };
 
 /* ---------- storage ---------- */
 function load(){
   try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && Array.isArray(d.equipment)) return d; }
   catch {}
-  return { equipment: [], entries: [], practice: [] };
+  return { equipment: [], entries: [], practice: [], snacks: [] };
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(DB)); }
 /* 旧版数据迁移:单组 sets/reps/weight -> 多组;补 practice 数组 */
@@ -30,6 +31,7 @@ function migrate(){
     if(!e.mode){ const q=eq(e.equipmentId); e.mode = q?.mode || 'weighted'; }
   });
   if(!Array.isArray(DB.practice)) DB.practice = [];
+  if(!Array.isArray(DB.snacks)) DB.snacks = [];
 }
 
 /* ---------- muscle groups ---------- */
@@ -135,17 +137,42 @@ function practiceStreak(){
   return streak;
 }
 
+/* ---------- snack aggregates ---------- */
+function todaySnacks(){ return DB.snacks.filter(s=>s.date===todayStr()).sort((a,b)=>a.createdAt-b.createdAt); }
+function snackKjSum(fn){ return DB.snacks.filter(fn).reduce((s,x)=>s+(+x.kj||0),0); }
+function snackKcalSum(fn){ return kjToKcal(snackKjSum(fn)); }
+function snackPeriod(kind){
+  if(kind==='today') return snackKcalSum(s=>s.date===todayStr());
+  if(kind==='week'){ const [s,e]=thisWeekRange(); return snackKcalSum(x=>{const d=new Date(x.date+'T00:00:00'); return d>=s&&d<=e;}); }
+  const n=new Date(), s=new Date(n.getFullYear(),n.getMonth(),1), e=new Date(n.getFullYear(),n.getMonth()+1,0);
+  return snackKcalSum(x=>{const d=new Date(x.date+'T00:00:00'); return d>=s&&d<=e;});
+}
+function snackDailySeries(n){
+  const out=[]; const t=new Date(todayStr()+'T00:00:00');
+  for(let i=n-1;i>=0;i--){ const d=new Date(t); d.setDate(d.getDate()-i); const s=fmt(d); out.push({label:fmtShort(s), value:snackKcalSum(x=>x.date===s)}); }
+  return out;
+}
+function snackStreak(){
+  const set=new Set(DB.snacks.map(s=>s.date));
+  let streak=0; const d=new Date(todayStr()+'T00:00:00');
+  if(!set.has(fmt(d))) d.setDate(d.getDate()-1);
+  while(set.has(fmt(d))){ streak++; d.setDate(d.getDate()-1); }
+  return streak;
+}
+
 /* ---------- charts ---------- */
 function vbars(data, height=180){
   const max = Math.max(1, ...data.map(d=>d.value));
   const total = data.reduce((s,d)=>s+d.value,0);
   if(!total) return `<div class="chart-empty">暂无数据,去记录第一条吧</div>`;
+  const n = data.length;
   return `<div class="vbars" style="height:${height}px">${data.map((d,i)=>{
     const h = (d.value/max*100).toFixed(2);
+    const show = (n-1-i)%3===0;
     return `<div class="vbar-col">
       <div class="vbar-val">${d.value?fmtNum(d.value):''}</div>
       <div class="vbar-track"><div class="vbar" style="--h:${h}%;animation-delay:${i*35}ms"></div></div>
-      <div class="vbar-lbl">${d.label}</div>
+      <div class="vbar-lbl">${show?d.label:''}</div>
     </div>`;
   }).join('')}</div>`;
 }
@@ -236,6 +263,23 @@ function practiceHeatmap(){
     titleFn: (ds,v) => v>0 ? `${ds} · ${v} 分钟` : `${ds} · 休息`
   });
 }
+function kjToKcal(k){ return Math.round((+k||0)/4.184); }
+function kcalColor(c){
+  if(c<=0) return '#171b21';
+  if(c<=200) return 'rgba(255,122,60,.22)';
+  if(c<=500) return 'rgba(255,122,60,.45)';
+  if(c<=1000) return 'rgba(255,122,60,.7)';
+  return 'rgba(255,122,60,.95)';
+}
+function snackHeatmap(){
+  const map={};
+  DB.snacks.forEach(s=>{ map[s.date]=(map[s.date]||0)+kjToKcal(s.kj); });
+  return heatGrid({
+    valueFn: ds => map[ds]||0,
+    colorFn: kcalColor,
+    titleFn: (ds,v) => v>0 ? `${ds} · ${fmtNum(v)} kcal` : `${ds} · 无记录`
+  });
+}
 
 /* ---------- shell ---------- */
 function header(){
@@ -315,6 +359,23 @@ function practiceRow(p){
     </div>
   </div>`;
 }
+function snackRow(s, {dual=false}={}){
+  const kcal = kjToKcal(s.kj);
+  const vol = dual
+    ? `${fmtNum(s.kj)}<span>kJ</span><small style="display:block;font-size:10px;color:var(--dim);font-family:'Space Mono',monospace">≈${kcal} kcal</small>`
+    : `${fmtNum(kcal)}<span>kcal</span>`;
+  return `<div class="entry">
+    <div class="entry-main">
+      <div class="entry-name">${esc(s.name)}<span class="tag" style="--c:#ff7a3c">热量</span></div>
+      <div class="entry-meta">${s.note?esc(s.note):'热量记录'}</div>
+    </div>
+    <div class="entry-vol">${vol}</div>
+    <div class="entry-act">
+      <button data-act="edit-snack" data-id="${s.id}">改</button>
+      <button data-act="del-snack" data-id="${s.id}">删</button>
+    </div>
+  </div>`;
+}
 function renderRecord(){
   const te = todayEntries();
   const tVol = te.reduce((s,e)=>s+vol(e),0);
@@ -322,6 +383,8 @@ function renderRecord(){
   const tReps = te.reduce((s,e)=>s+totalReps(e),0);
   const tp = todayPractice();
   const tpMin = tp.reduce((s,p)=>s+(+p.minutes||0),0);
+  const ts = todaySnacks();
+  const tsKj = ts.reduce((s,x)=>s+(+x.kj||0),0);
   const dstr = todayStr();
   return `
   <section class="reveal">
@@ -342,6 +405,10 @@ function renderRecord(){
   <section class="reveal">
     <div class="sub-head"><span class="sub-title">练习<em>${tpMin} 分钟</em></span><button class="sec-add" data-act="new-practice">+ 记录</button></div>
     ${tp.length ? `<div class="entry-list">${tp.map(practiceRow).join('')}</div>` : `<div class="empty">还没有练习记录,点「+ 记录」开始</div>`}
+  </section>
+  <section class="reveal">
+    <div class="sub-head"><span class="sub-title">热量<em>${fmtNum(tsKj)} kJ · ≈${kjToKcal(tsKj)} kcal</em></span><button class="sec-add" data-act="new-snack">+ 记录</button></div>
+    ${ts.length ? `<div class="entry-list">${ts.map(s=>snackRow(s,{dual:true})).join('')}</div>` : `<div class="empty">还没有热量记录,点「+ 记录」开始</div>`}
   </section>`;
 }
 
@@ -404,8 +471,8 @@ function renderLibrary(){
 
 /* ---------- reports view ---------- */
 function renderReports(){
-  const toggle = `<div class="rpt-toggle"><button class="chip ${state.reportsView==='fitness'?'on':''}" data-act="rpt-view" data-v="fitness">训练</button><button class="chip ${state.reportsView==='practice'?'on':''}" data-act="rpt-view" data-v="practice">练习</button></div>`;
-  return toggle + (state.reportsView==='practice' ? practiceReports() : fitnessReports());
+  const toggle = `<div class="rpt-toggle"><button class="chip ${state.reportsView==='fitness'?'on':''}" data-act="rpt-view" data-v="fitness">训练</button><button class="chip ${state.reportsView==='practice'?'on':''}" data-act="rpt-view" data-v="practice">练习</button><button class="chip ${state.reportsView==='snack'?'on':''}" data-act="rpt-view" data-v="snack">热量</button></div>`;
+  return toggle + (state.reportsView==='practice' ? practiceReports() : state.reportsView==='snack' ? snackReports() : fitnessReports());
 }
 function fitnessReports(){
   const bwReps = byEquipmentReps();
@@ -449,29 +516,55 @@ function practiceReports(){
   <section class="reveal"><div class="sec-title">近 14 天 · 每日练习时长</div>${vbars(practiceDailySeries(14))}</section>
   <section class="reveal"><div class="sec-title">练习热力图 · 近 6 月<span class="sec-sub">颜色 = 当天分钟</span></div>${practiceHeatmap()}</section>`;
 }
+function snackReports(){
+  const totalDays = new Set(DB.snacks.map(s=>s.date)).size;
+  const totalKcal = kjToKcal(DB.snacks.reduce((s,x)=>s+(+x.kj||0),0));
+  return `
+  <section class="reveal">
+    <div class="stat-row">
+      ${statCard('今日', fmtNum(snackPeriod('today')), 'kcal')}
+      ${statCard('本周', fmtNum(snackPeriod('week')), 'kcal')}
+      ${statCard('本月', fmtNum(snackPeriod('month')), 'kcal')}
+    </div>
+  </section>
+  <section class="reveal">
+    <div class="stat-row">
+      ${statCard('连续打卡', snackStreak(), '天')}
+      ${statCard('总天数', totalDays, '天')}
+      ${statCard('总热量', fmtNum(totalKcal), 'kcal')}
+    </div>
+  </section>
+  <section class="reveal"><div class="sec-title">近 14 天 · 每日热量</div>${vbars(snackDailySeries(14))}</section>
+  <section class="reveal"><div class="sec-title">热量热力图 · 近 6 月<span class="sec-sub">颜色 = 当天 kcal</span></div>${snackHeatmap()}</section>`;
+}
 
 /* ---------- history view ---------- */
 function renderHistory(){
-  if(!DB.entries.length && !DB.practice.length) return `<section class="reveal"><div class="empty">还没有历史记录</div></section>`;
+  if(!DB.entries.length && !DB.practice.length && !DB.snacks.length) return `<section class="reveal"><div class="empty">还没有历史记录</div></section>`;
   const byDate = {};
-  DB.entries.forEach(e => { (byDate[e.date] ||= {fit:[], prac:[]}).fit.push(e); });
-  DB.practice.forEach(p => { (byDate[p.date] ||= {fit:[], prac:[]}).prac.push(p); });
+  DB.entries.forEach(e => { (byDate[e.date] ||= {fit:[], prac:[], snack:[]}).fit.push(e); });
+  DB.practice.forEach(p => { (byDate[p.date] ||= {fit:[], prac:[], snack:[]}).prac.push(p); });
+  DB.snacks.forEach(s => { (byDate[s.date] ||= {fit:[], prac:[], snack:[]}).snack.push(s); });
   return Object.keys(byDate).sort((a,b)=>b.localeCompare(a)).map(d=>{
-    const {fit, prac} = byDate[d];
+    const {fit, prac, snack} = byDate[d];
     const es = fit.sort((a,b)=>a.createdAt-b.createdAt);
     const ps = prac.sort((a,b)=>a.createdAt-b.createdAt);
+    const ss = snack.sort((a,b)=>a.createdAt-b.createdAt);
     const v = es.reduce((s,e)=>s+vol(e),0);
     const sets = es.reduce((s,e)=>s+totalSets(e),0);
     const reps = es.reduce((s,e)=>s+totalReps(e),0);
     const pmin = ps.reduce((s,p)=>s+(+p.minutes||0),0);
+    const skj = ss.reduce((s,x)=>s+(+x.kj||0),0);
+    const skcal = kjToKcal(skj);
     const fitStr = es.length ? `${es.length} 器械 · ${sets} 组 · ${reps} 次${v>0?` · ${fmtNum(v)} kg`:''}` : '';
     const pracStr = ps.length ? `练习 ${pmin} 分` : '';
+    const snackStr = ss.length ? `热量 ${fmtNum(skcal)} kcal` : '';
     return `<section class="reveal">
       <div class="day-head sm"><div>
         <div class="day-date">${fmtShort(d)}<span class="wd">${weekdayStr(d)}</span></div>
-        <div class="day-sub">${[fitStr, pracStr].filter(Boolean).join(' · ')}</div>
+        <div class="day-sub">${[fitStr, pracStr, snackStr].filter(Boolean).join(' · ')}</div>
       </div></div>
-      <div class="entry-list">${es.map(entryRow).join('')}${ps.length?`<div class="day-divider">练习</div>${ps.map(practiceRow).join('')}`:''}</div>
+      <div class="entry-list">${es.map(entryRow).join('')}${ps.length?`<div class="day-divider">练习</div>${ps.map(practiceRow).join('')}`:''}${ss.length?`<div class="day-divider">热量</div>${ss.map(s=>snackRow(s)).join('')}`:''}</div>
     </section>`;
   }).join('');
 }
@@ -489,7 +582,7 @@ function openEditorEdit(id){
   state.practiceEditor=null;
   renderModal();
 }
-function closeEditor(){ state.editor = null; state.practiceEditor = null; const m = document.getElementById('modal'); if(m){ m.innerHTML=''; m.classList.remove('open'); } }
+function closeEditor(){ state.editor = null; state.practiceEditor = null; state.snackEditor = null; const m = document.getElementById('modal'); if(m){ m.innerHTML=''; m.classList.remove('open'); } }
 
 function setStepper(field, i, val, unit){
   return `<div class="set-step">
@@ -639,6 +732,64 @@ function deletePractice(id, closeModal){
   save(); if(closeModal) closeEditor(); render();
 }
 
+/* ---------- snack editor modal ---------- */
+function openSnackNew(){ state.snackEditor={mode:'new', date:todayStr(), name:'', kj:800, note:''}; state.editor=null; renderSnackModal(); }
+function openSnackEdit(id){
+  const s = DB.snacks.find(x=>x.id===id); if(!s) return;
+  state.snackEditor={mode:'edit', id, date:s.date, name:s.name, kj:s.kj, note:s.note||''};
+  state.editor=null;
+  renderSnackModal();
+}
+function updateSnackPreview(){
+  const ed=state.snackEditor; const p=document.getElementById('s-preview');
+  if(ed && p) p.textContent = `≈${Math.round((+ed.kj||0)/4.184)} kcal`;
+}
+function renderSnackModal(){
+  const ed=state.snackEditor; const wrap=document.getElementById('modal');
+  if(!ed){ wrap.innerHTML=''; wrap.classList.remove('open'); return; }
+  wrap.innerHTML=`<div class="sheet">
+    <div class="modal-head"><span>${ed.mode==='edit'?'编辑热量':'记录热量'}</span><button class="x" data-act="close">×</button></div>
+    <div class="modal-body">
+      <label class="field"><span>日期</span><input type="date" id="s-date" value="${ed.date}"></label>
+      <label class="field" style="margin-top:14px"><span>名称</span><input type="text" id="s-name" value="${esc(ed.name)}" placeholder="如 薯片 / 辣条 / 奶茶"></label>
+      <div class="field-label">热量 (kJ)</div>
+      <div class="min-step">
+        <button class="ss-btn" data-act="sstep" data-delta="-10">−</button>
+        <input class="set-val" id="s-kj" type="number" inputmode="numeric" value="${ed.kj}">
+        <span class="ss-unit">kJ</span>
+        <button class="ss-btn" data-act="sstep" data-delta="10">+</button>
+      </div>
+      <div class="preview" id="s-preview">≈${Math.round((+ed.kj||0)/4.184)} kcal</div>
+      <label class="field" style="margin-top:14px"><span>备注</span><input type="text" id="s-note" value="${esc(ed.note)}" placeholder="可选"></label>
+      <div class="modal-actions">
+        ${ed.mode==='edit'?`<button class="btn danger" data-act="del-snack-modal">删除</button>`:''}
+        <button class="btn primary" data-act="save-snack">保存</button>
+      </div>
+    </div>
+  </div>`;
+  wrap.classList.add('open');
+}
+function saveSnack(){
+  const ed=state.snackEditor; if(!ed) return;
+  const dateEl=document.getElementById('s-date'); if(dateEl) ed.date=dateEl.value;
+  const nameEl=document.getElementById('s-name'); if(nameEl) ed.name=nameEl.value.trim();
+  const noteEl=document.getElementById('s-note'); if(noteEl) ed.note=noteEl.value.trim();
+  const kj=parseInt(ed.kj)||0;
+  if(!ed.name){ toast('请输入食物名称'); return; }
+  if(kj<=0){ toast('请输入大于 0 的热量'); return; }
+  if(ed.mode==='new'){
+    DB.snacks.push({ id:uid(), date:ed.date, name:ed.name, kj, note:ed.note, createdAt:Date.now() });
+  } else {
+    const s=DB.snacks.find(x=>x.id===ed.id); if(s){ s.date=ed.date; s.name=ed.name; s.kj=kj; s.note=ed.note; }
+  }
+  save(); closeEditor(); render(); toast('已保存');
+}
+function deleteSnack(id, closeModal){
+  if(!confirm('删除这条热量记录?')) return;
+  DB.snacks=DB.snacks.filter(s=>s.id!==id);
+  save(); if(closeModal) closeEditor(); render();
+}
+
 /* ---------- library actions ---------- */
 function addEquipment(){
   const name = document.getElementById('new-eq-name').value.trim();
@@ -717,6 +868,12 @@ function onDocClick(e){
     case 'del-practice-modal': deletePractice(state.practiceEditor.id, true); break;
     case 'pstep': { const ed=state.practiceEditor; if(ed){ ed.minutes=Math.max(0,(+ed.minutes||0)+parseInt(t.dataset.delta)); const el=document.getElementById('p-minutes'); if(el) el.value=ed.minutes; } } break;
     case 'save-practice': savePractice(); break;
+    case 'new-snack': openSnackNew(); break;
+    case 'edit-snack': openSnackEdit(t.dataset.id); break;
+    case 'del-snack': deleteSnack(t.dataset.id, false); break;
+    case 'del-snack-modal': deleteSnack(state.snackEditor.id, true); break;
+    case 'sstep': { const ed=state.snackEditor; if(ed){ ed.kj=Math.max(0,Math.round(((+ed.kj||0)+parseInt(t.dataset.delta))/10)*10); const el=document.getElementById('s-kj'); if(el) el.value=ed.kj; updateSnackPreview(); } } break;
+    case 'save-snack': saveSnack(); break;
     case 'rpt-view': state.reportsView=t.dataset.v; render(); break;
     case 'close': closeEditor(); break;
     case 'add-eq': addEquipment(); break;
@@ -734,12 +891,14 @@ function onDocClick(e){
     case 'heat': { const cap=document.getElementById('heat-cap'); if(cap) cap.textContent=t.dataset.info; } break;
     case 'export': exportData(); state.popover=false; render(); break;
     case 'import': document.getElementById('import-file').click(); break;
-    case 'clear': if(confirm('清空所有数据?此操作不可恢复。')){ DB={equipment:[],entries:[],practice:[]}; save(); state.popover=false; render(); } break;
+    case 'clear': if(confirm('清空所有数据?此操作不可恢复。')){ DB={equipment:[],entries:[],practice:[],snacks:[]}; save(); state.popover=false; render(); } break;
   }
 }
 function onDocInput(e){
   const pm = e.target.closest('#p-minutes');
   if(pm && state.practiceEditor){ state.practiceEditor.minutes = parseInt(pm.value)||0; return; }
+  const sk = e.target.closest('#s-kj');
+  if(sk && state.snackEditor){ state.snackEditor.kj = parseInt(sk.value)||0; updateSnackPreview(); return; }
   const sv = e.target.closest('.set-val');
   if(sv){ const i=+sv.dataset.i, f=sv.dataset.field; const v=parseFloat(sv.value); const r=state.editor?.rows?.[i]; if(r && !isNaN(v)){ r[f]=v; updatePreview(); } return; }
   const s = e.target.closest('[data-act="search-eq"]');
@@ -747,6 +906,7 @@ function onDocInput(e){
 }
 function onDocChange(e){
   const d = e.target.closest('#ed-date'); if(d && state.editor){ state.editor.date = d.value; return; }
+  const sd = e.target.closest('#s-date'); if(sd && state.snackEditor){ state.snackEditor.date = sd.value; return; }
   const rf = e.target.closest('#r-from'); if(rf){ state.range.from=rf.value; render(); return; }
   const rt = e.target.closest('#r-to'); if(rt){ state.range.to=rt.value; render(); return; }
 }
@@ -755,6 +915,6 @@ document.addEventListener('click', onDocClick);
 document.addEventListener('input', onDocInput);
 document.addEventListener('change', onDocChange);
 document.getElementById('import-file').addEventListener('change', importData);
-document.addEventListener('keydown', e=>{ if(e.key==='Escape' && (state.editor||state.practiceEditor)) closeEditor(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && (state.editor||state.practiceEditor||state.snackEditor)) closeEditor(); });
 
 render();
