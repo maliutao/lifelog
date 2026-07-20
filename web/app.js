@@ -575,11 +575,11 @@ function defaultRows(q){
   const w = q.mode==='bodyweight' ? null : 30;
   return Array.from({length:4}, ()=>({reps:12, weight:w}));
 }
-function openEditorNew(){ state.editor = {mode:'new', equipmentId:null, date:todayStr(), eqMode:'weighted', rows:null}; state.practiceEditor=null; renderModal(); }
+function openEditorNew(){ state.editor = {mode:'new', equipmentId:null, date:todayStr(), eqMode:'weighted', rows:null}; state.practiceEditor=null; state.snackEditor=null; renderModal(); }
 function openEditorEdit(id){
   const e = DB.entries.find(x=>x.id===id); if(!e) return;
   state.editor = {mode:'edit', entryId:id, equipmentId:e.equipmentId, date:e.date, eqMode:e.mode, rows:e.sets.map(s=>({reps:s.reps, weight:s.weight}))};
-  state.practiceEditor=null;
+  state.practiceEditor=null; state.snackEditor=null;
   renderModal();
 }
 function closeEditor(){ state.editor = null; state.practiceEditor = null; state.snackEditor = null; const m = document.getElementById('modal'); if(m){ m.innerHTML=''; m.classList.remove('open'); } }
@@ -683,11 +683,11 @@ function saveEditor(){
 }
 
 /* ---------- practice editor modal ---------- */
-function openPracticeNew(){ state.practiceEditor={mode:'new', date:todayStr(), minutes:30, note:''}; state.editor=null; renderPracticeModal(); }
+function openPracticeNew(){ state.practiceEditor={mode:'new', date:todayStr(), minutes:30, note:''}; state.editor=null; state.snackEditor=null; renderPracticeModal(); }
 function openPracticeEdit(id){
   const p = DB.practice.find(x=>x.id===id); if(!p) return;
   state.practiceEditor={mode:'edit', id, date:p.date, minutes:p.minutes, note:p.note||''};
-  state.editor=null;
+  state.editor=null; state.snackEditor=null;
   renderPracticeModal();
 }
 function renderPracticeModal(){
@@ -733,16 +733,16 @@ function deletePractice(id, closeModal){
 }
 
 /* ---------- snack editor modal ---------- */
-function openSnackNew(){ state.snackEditor={mode:'new', date:todayStr(), name:'', kj:800, note:''}; state.editor=null; renderSnackModal(); }
+function openSnackNew(){ state.snackEditor={mode:'new', date:todayStr(), name:'', kj:800, note:''}; state.editor=null; state.practiceEditor=null; renderSnackModal(); }
 function openSnackEdit(id){
   const s = DB.snacks.find(x=>x.id===id); if(!s) return;
   state.snackEditor={mode:'edit', id, date:s.date, name:s.name, kj:s.kj, note:s.note||''};
-  state.editor=null;
+  state.editor=null; state.practiceEditor=null;
   renderSnackModal();
 }
 function updateSnackPreview(){
   const ed=state.snackEditor; const p=document.getElementById('s-preview');
-  if(ed && p) p.textContent = `≈${Math.round((+ed.kj||0)/4.184)} kcal`;
+  if(ed && p) p.textContent = `≈${kjToKcal(ed.kj)} kcal`;
 }
 function renderSnackModal(){
   const ed=state.snackEditor; const wrap=document.getElementById('modal');
