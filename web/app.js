@@ -598,10 +598,17 @@ function renderHistory(){
 }
 
 /* ---------- fitness editor modal ---------- */
+function defaultRow(q){
+  // 单组默认值:沿用上一次最后一组的次数/重量
+  if(q.lastSets && q.lastSets.length){
+    const last = q.lastSets[q.lastSets.length-1];
+    return {reps:last.reps, weight:last.weight};
+  }
+  return {reps:12, weight: q.mode==='bodyweight' ? null : 30};
+}
 function defaultRows(q){
-  if(q.lastSets && q.lastSets.length) return q.lastSets.map(s=>({reps:s.reps, weight:s.weight}));
-  const w = q.mode==='bodyweight' ? null : 30;
-  return Array.from({length:4}, ()=>({reps:12, weight:w}));
+  // 新建时默认 1 组(连续录入模式)
+  return [defaultRow(q)];
 }
 function openEditorNew(){ state.editor = {mode:'new', equipmentId:null, date:todayStr(), eqMode:'weighted', rows:null}; state.practiceEditor=null; state.snackEditor=null; renderModal(); }
 function openEditorEdit(id){
@@ -610,7 +617,25 @@ function openEditorEdit(id){
   state.practiceEditor=null; state.snackEditor=null;
   renderModal();
 }
-function closeEditor(){ state.editor = null; state.practiceEditor = null; state.snackEditor = null; const m = document.getElementById('modal'); if(m){ m.innerHTML=''; m.classList.remove('open'); } }
+function closeEditor(){
+  // 连续录入中关闭:若有未保存的有效组,先保存
+  const ed = state.editor;
+  if(ed && ed.inflight){
+    const sets = currentValidSets(ed);
+    if(sets.length){
+      const q = eq(ed.equipmentId); const mode = q?.mode || ed.eqMode;
+      const entry = DB.entries.find(x=>x.id===ed.entryId);
+      if(entry){
+        const dateEl = document.getElementById('ed-date'); if(dateEl) ed.date=dateEl.value;
+        entry.sets.push(...sets); entry.date=ed.date; entry.mode=mode;
+        if(q) q.lastSets = entry.sets.map(s=>({reps:s.reps,weight:s.weight}));
+        save();
+      }
+    }
+  }
+  state.editor = null; state.practiceEditor = null; state.snackEditor = null;
+  const m = document.getElementById('modal'); if(m){ m.innerHTML=''; m.classList.remove('open'); }
+}
 
 function setStepper(field, i, val, unit){
   return `<div class="set-step">
@@ -675,39 +700,82 @@ function renderModal(){
       <div class="modal-body"><input class="search" data-act="search-eq" placeholder="搜索器械…" autocomplete="off">
       <div class="pick-list">${list}</div></div>`;
   } else {
-    body = `<div class="modal-head"><span>${ed.mode==='edit'?'编辑记录':'记录训练'}</span><button class="x" data-act="close">×</button></div>
+    const inflight = ed.inflight;
+    const isHistEdit = ed.mode==='edit' && !inflight;
+    let banner = '';
+    if(inflight){
+      const entry = DB.entries.find(x=>x.id===ed.entryId);
+      const savedSets = entry?.sets?.length || 0;
+      const savedReps = entry ? entry.sets.reduce((s,r)=>s+(+r.reps||0),0) : 0;
+      const savedKg = entry && ed.eqMode!=='bodyweight' ? entry.sets.reduce((s,r)=>s+(+r.reps||0)*(+r.weight||0),0) : 0;
+      banner = `<div class="inflight-banner">✓ 已记 ${savedSets} 组${ed.eqMode==='bodyweight'?` · ${savedReps} 次`:` · ${savedReps} 次 · ${fmtNum(savedKg)} kg`}</div>`;
+    }
+    const fieldLbl = inflight ? '本组数据' : '训练组数据(可添加多组一次保存)';
+    const actions = inflight
+      ? `<button class="btn danger sm" data-act="del-in-editor">删除</button>
+         <button class="btn ghost" data-act="finish-inflight">完成</button>
+         <button class="btn primary" data-act="save-set">保存本组</button>`
+      : isHistEdit
+        ? `<button class="btn danger" data-act="del-in-editor">删除</button>
+           <button class="btn primary" data-act="save">保存</button>`
+        : `<button class="btn primary" data-act="save-set">保存本组</button>`;
+    body = `<div class="modal-head"><span>${isHistEdit?'编辑记录':'记录训练'}</span><button class="x" data-act="close">×</button></div>
       <div class="modal-body">
         <div class="ed-eq"><div>
           <div class="ed-eq-name">${esc(q?.name||'?')} <span class="tag" style="--c:${groupColor(q?.muscle||'其他')}">${esc(q?.muscle||'其他')}</span> ${ed.eqMode==='bodyweight'?'<span class="tag" style="--c:#9aa0a6">自重</span>':''}</div>
-        </div>${ed.mode==='new'?`<button class="link" data-act="reset-eq">更换</button>`:''}</div>
+        </div>${ed.mode==='new' || inflight ?`<button class="link" data-act="reset-eq">更换</button>`:''}</div>
         <label class="field"><span>日期</span><input type="date" id="ed-date" value="${ed.date}"></label>
-        <div class="field-label">训练组数 · 默认 5 组,没做的组可点 ✕ 删除</div>
+        <div class="field-label">${fieldLbl}</div>
         <div class="sets" id="sets-list"></div>
         <button class="btn ghost sm add-set" data-act="add-set">+ 添加一组</button>
         <div class="preview" id="ed-preview"></div>
-        <div class="modal-actions">
-          ${ed.mode==='edit'?`<button class="btn danger" data-act="del-in-editor">删除</button>`:''}
-          <button class="btn primary" data-act="save">保存</button>
-        </div>
+        ${banner}
+        <div class="modal-actions">${actions}</div>
       </div>`;
   }
   wrap.innerHTML = `<div class="sheet">${body}</div>`;
   wrap.classList.add('open');
   renderSets();
 }
+function currentValidSets(ed){
+  return ed.rows.filter(r=>(+r.reps||0)>0).map(r=>({ reps:Math.round(+r.reps||0), weight: ed.eqMode==='bodyweight' ? null : (+r.weight||0) }));
+}
 function saveEditor(){
+  // 仅用于历史 entry 的整存整取编辑
   const ed = state.editor; if(!ed || !ed.equipmentId) return;
   const dateEl = document.getElementById('ed-date'); if(dateEl) ed.date = dateEl.value;
-  const sets = ed.rows.filter(r=>(+r.reps||0)>0).map(r=>({ reps:Math.round(+r.reps||0), weight: ed.eqMode==='bodyweight' ? null : (+r.weight||0) }));
+  const sets = currentValidSets(ed);
   if(!sets.length){ toast('请至少完成一组(次数大于 0)'); return; }
   const q = eq(ed.equipmentId); const mode = q?.mode || ed.eqMode;
-  if(ed.mode==='new'){
-    DB.entries.push({ id:uid(), date:ed.date, equipmentId:ed.equipmentId, mode, sets, createdAt:Date.now() });
-    if(q) q.lastSets = sets.map(s=>({reps:s.reps, weight:s.weight}));
-  } else {
-    const e = DB.entries.find(x=>x.id===ed.entryId); if(e){ e.date=ed.date; e.sets=sets; e.mode=mode; }
-  }
+  const e = DB.entries.find(x=>x.id===ed.entryId); if(e){ e.date=ed.date; e.sets=sets; e.mode=mode; if(q) q.lastSets=sets.map(s=>({reps:s.reps,weight:s.weight})); }
   save(); closeEditor(); render(); toast('已保存');
+}
+function saveSet(){
+  // 连续录入:把当前 rows 追加到 in-flight entry(首次则创建),然后重置为 1 行
+  const ed = state.editor; if(!ed || !ed.equipmentId) return;
+  const dateEl = document.getElementById('ed-date'); if(dateEl) ed.date = dateEl.value;
+  const sets = currentValidSets(ed);
+  if(!sets.length){ toast('请输入次数(大于 0)'); return; }
+  const q = eq(ed.equipmentId); const mode = q?.mode || ed.eqMode;
+  let entry;
+  if(ed.mode==='new' && !ed.entryId){
+    entry = { id:uid(), date:ed.date, equipmentId:ed.equipmentId, mode, sets:[], createdAt:Date.now() };
+    DB.entries.push(entry);
+    ed.entryId = entry.id; ed.mode='edit'; ed.inflight = true;
+  } else {
+    entry = DB.entries.find(x=>x.id===ed.entryId);
+  }
+  if(entry){ entry.sets.push(...sets); entry.date=ed.date; entry.mode=mode; if(q) q.lastSets = entry.sets.map(s=>({reps:s.reps,weight:s.weight})); }
+  save();
+  // 重置为 1 行,沿用上一组重量
+  ed.rows = [defaultRow(q || {mode:ed.eqMode, lastSets:sets.map(s=>({reps:s.reps,weight:s.weight}))})];
+  renderModal();
+}
+function finishInflight(){
+  const ed = state.editor; if(!ed) return;
+  const sets = currentValidSets(ed);
+  if(sets.length){ saveSet(); }
+  closeEditor(); render();
 }
 
 /* ---------- practice editor modal ---------- */
@@ -891,7 +959,16 @@ function onDocClick(e){
     case 'add-set': addSet(); break;
     case 'del-set': delSet(+t.dataset.i); break;
     case 'save': saveEditor(); break;
-    case 'del-in-editor': if(confirm('删除这条记录?')){ DB.entries=DB.entries.filter(x=>x.id!==state.editor.entryId); save(); closeEditor(); render(); } break;
+    case 'save-set': saveSet(); break;
+    case 'finish-inflight': finishInflight(); break;
+    case 'del-in-editor': {
+      const ed=state.editor;
+      if(confirm(ed.inflight?'放弃当前训练(删除所有已记组)?':'删除这条记录?')){
+        if(ed.entryId) DB.entries=DB.entries.filter(x=>x.id!==ed.entryId);
+        save(); state.editor=null; closeEditor(); render();
+      }
+      break;
+    }
     case 'new-practice': openPracticeNew(); break;
     case 'edit-practice': openPracticeEdit(t.dataset.id); break;
     case 'del-practice': deletePractice(t.dataset.id, false); break;

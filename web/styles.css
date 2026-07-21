@@ -299,6 +299,7 @@ input::placeholder{color:var(--dim-2)}
 .preview{background:rgba(200,255,58,.06);border:1px solid rgba(200,255,58,.25);border-radius:var(--r);padding:14px;text-align:center;font:700 18px 'Big Shoulders Display';letter-spacing:.02em;margin-top:14px}
 .preview span{color:var(--dim);margin:0 4px}
 .preview b{color:var(--accent)}
+.inflight-banner{background:rgba(200,255,58,.1);border:1px solid rgba(200,255,58,.35);border-radius:var(--r);padding:10px 14px;margin-top:12px;font:600 13px 'Archivo';color:var(--accent);text-align:center;letter-spacing:.02em}
 .modal-actions{display:flex;gap:10px;margin-top:14px;position:sticky;bottom:0;background:linear-gradient(180deg,transparent,var(--panel) 36%);padding-top:10px}
 .modal-actions .btn{flex:1}
 
