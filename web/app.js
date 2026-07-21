@@ -10,7 +10,7 @@
 const KEY = 'liftlog.db.v1';
 let DB = load();
 migrate();
-const state = { tab:'record', editor:null, practiceEditor:null, snackEditor:null, popover:false, libEdit:null, libEditVals:null, newEq:{muscle:'胸', mode:'weighted'}, range:{kind:'all'}, reportsView:'fitness' };
+const state = { tab:'record', editor:null, practiceEditor:null, snackEditor:null, settingsOpen:false, libEdit:null, libEditVals:null, newEq:{muscle:'胸', mode:'weighted'}, range:{kind:'all'}, reportsView:'fitness', historyView:'all' };
 
 /* ---------- storage ---------- */
 function load(){
@@ -282,23 +282,25 @@ function snackHeatmap(){
 }
 
 /* ---------- shell ---------- */
+const GEAR_SVG = '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>';
+const BACK_SVG = '<polyline points="15 18 9 12 15 6"/>';
 function header(){
+  if(state.settingsOpen){
+    return `<header class="top">
+      <button class="icon-btn" data-act="close-settings" aria-label="返回"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${BACK_SVG}</svg></button>
+      <div class="settings-title">设置</div>
+      <div class="icon-btn" style="visibility:hidden"><svg viewBox="0 0 24 24" width="18" height="18"></svg></div>
+    </header>`;
+  }
   return `<header class="top">
     <div class="brand"><svg class="brand-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="9" width="3" height="6" rx="1"/><rect x="4" y="7" width="2.4" height="10" rx="1"/><line x1="6.4" y1="12" x2="17.6" y2="12"/><rect x="17.6" y="7" width="2.4" height="10" rx="1"/><rect x="20" y="9" width="3" height="6" rx="1"/></svg>LIFELOG<span class="brand-sub">生活日志</span></div>
-    <div class="data-menu">
-      <button class="icon-btn" data-act="popover">数据</button>
-      ${state.popover?`<div class="popover">
-        <button data-act="export">导出 JSON 备份</button>
-        <button data-act="import">导入 JSON</button>
-        <button data-act="clear" class="danger">清空所有数据</button>
-      </div>`:''}
-    </div>
+    <button class="icon-btn" data-act="open-settings" aria-label="设置"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${GEAR_SVG}</svg></button>
   </header>`;
 }
 function navbar(){
+  if(state.settingsOpen) return '';
   const items = [
     ['record','记录','<path d="M12 5v14M5 12h14"/>'],
-    ['library','器械库','<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'],
     ['reports','报表','<line x1="6" y1="20" x2="6" y2="13"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="10"/>'],
     ['history','历史','<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'],
   ];
@@ -309,8 +311,8 @@ function navbar(){
     </button>`).join('')}</nav>`;
 }
 function view(){
+  if(state.settingsOpen) return renderSettings();
   if(state.tab==='record') return renderRecord();
-  if(state.tab==='library') return renderLibrary();
   if(state.tab==='reports') return renderReports();
   return renderHistory();
 }
@@ -412,7 +414,7 @@ function renderRecord(){
   </section>`;
 }
 
-/* ---------- library view ---------- */
+/* ---------- library (equipment) ---------- */
 function eqRow(e, editing){
   if(editing){
     const v = state.libEditVals || {muscle:e.muscle, mode:e.mode};
@@ -442,7 +444,7 @@ function eqRow(e, editing){
     </div>
   </div>`;
 }
-function renderLibrary(){
+function equipmentSection(){
   return `
   <section class="reveal">
     <div class="sec-title">新增器械</div>
@@ -466,6 +468,21 @@ function renderLibrary(){
     ${DB.equipment.length
       ? `<div class="eq-list">${DB.equipment.map(e=>eqRow(e, state.libEdit===e.id)).join('')}</div>`
       : `<div class="empty">还没有器械。<button class="link" data-act="load-samples">载入常用示例</button> 或 在上方添加</div>`}
+  </section>`;
+}
+
+/* ---------- settings view ---------- */
+function renderSettings(){
+  return `
+  ${equipmentSection()}
+  <section class="reveal">
+    <div class="sec-title">数据管理</div>
+    <div class="settings-list">
+      <button class="settings-row" data-act="export"><span>导出 JSON 备份</span><span class="dim">下载全部数据</span></button>
+      <button class="settings-row" data-act="import"><span>导入 JSON</span><span class="dim">从备份文件恢复</span></button>
+      <button class="settings-row danger" data-act="clear"><span>清空所有数据</span><span class="dim">不可恢复</span></button>
+    </div>
+    <div class="hint">数据存于浏览器 localStorage,导出的 JSON 文件可作备份。</div>
   </section>`;
 }
 
@@ -541,30 +558,41 @@ function snackReports(){
 /* ---------- history view ---------- */
 function renderHistory(){
   if(!DB.entries.length && !DB.practice.length && !DB.snacks.length) return `<section class="reveal"><div class="empty">还没有历史记录</div></section>`;
+  const v = state.historyView;
+  const toggle = `<div class="rpt-toggle"><button class="chip ${v==='all'?'on':''}" data-act="hist-view" data-v="all">全部</button><button class="chip ${v==='fitness'?'on':''}" data-act="hist-view" data-v="fitness">训练</button><button class="chip ${v==='practice'?'on':''}" data-act="hist-view" data-v="practice">练习</button><button class="chip ${v==='snack'?'on':''}" data-act="hist-view" data-v="snack">热量</button></div>`;
+  const showFit = v==='all' || v==='fitness';
+  const showPrac = v==='all' || v==='practice';
+  const showSnack = v==='all' || v==='snack';
   const byDate = {};
-  DB.entries.forEach(e => { (byDate[e.date] ||= {fit:[], prac:[], snack:[]}).fit.push(e); });
-  DB.practice.forEach(p => { (byDate[p.date] ||= {fit:[], prac:[], snack:[]}).prac.push(p); });
-  DB.snacks.forEach(s => { (byDate[s.date] ||= {fit:[], prac:[], snack:[]}).snack.push(s); });
-  return Object.keys(byDate).sort((a,b)=>b.localeCompare(a)).map(d=>{
+  if(showFit) DB.entries.forEach(e => { (byDate[e.date] ||= {fit:[], prac:[], snack:[]}).fit.push(e); });
+  if(showPrac) DB.practice.forEach(p => { (byDate[p.date] ||= {fit:[], prac:[], snack:[]}).prac.push(p); });
+  if(showSnack) DB.snacks.forEach(s => { (byDate[s.date] ||= {fit:[], prac:[], snack:[]}).snack.push(s); });
+  const dates = Object.keys(byDate).sort((a,b)=>b.localeCompare(a));
+  if(!dates.length) return toggle + `<section class="reveal"><div class="empty">该类型暂无记录</div></section>`;
+  return toggle + dates.map(d=>{
     const {fit, prac, snack} = byDate[d];
-    const es = fit.sort((a,b)=>a.createdAt-b.createdAt);
-    const ps = prac.sort((a,b)=>a.createdAt-b.createdAt);
-    const ss = snack.sort((a,b)=>a.createdAt-b.createdAt);
-    const v = es.reduce((s,e)=>s+vol(e),0);
+    const es = (fit||[]).sort((a,b)=>a.createdAt-b.createdAt);
+    const ps = (prac||[]).sort((a,b)=>a.createdAt-b.createdAt);
+    const ss = (snack||[]).sort((a,b)=>a.createdAt-b.createdAt);
+    const vk = es.reduce((s,e)=>s+vol(e),0);
     const sets = es.reduce((s,e)=>s+totalSets(e),0);
     const reps = es.reduce((s,e)=>s+totalReps(e),0);
     const pmin = ps.reduce((s,p)=>s+(+p.minutes||0),0);
     const skj = ss.reduce((s,x)=>s+(+x.kj||0),0);
     const skcal = kjToKcal(skj);
-    const fitStr = es.length ? `${es.length} 器械 · ${sets} 组 · ${reps} 次${v>0?` · ${fmtNum(v)} kg`:''}` : '';
+    const fitStr = es.length ? `${es.length} 器械 · ${sets} 组 · ${reps} 次${vk>0?` · ${fmtNum(vk)} kg`:''}` : '';
     const pracStr = ps.length ? `练习 ${pmin} 分` : '';
     const snackStr = ss.length ? `热量 ${fmtNum(skcal)} kcal` : '';
+    const parts = [];
+    if(es.length) parts.push(es.map(entryRow).join(''));
+    if(ps.length) parts.push(`<div class="day-divider">练习</div>${ps.map(practiceRow).join('')}`);
+    if(ss.length) parts.push(`<div class="day-divider">热量</div>${ss.map(s=>snackRow(s)).join('')}`);
     return `<section class="reveal">
       <div class="day-head sm"><div>
         <div class="day-date">${fmtShort(d)}<span class="wd">${weekdayStr(d)}</span></div>
         <div class="day-sub">${[fitStr, pracStr, snackStr].filter(Boolean).join(' · ')}</div>
       </div></div>
-      <div class="entry-list">${es.map(entryRow).join('')}${ps.length?`<div class="day-divider">练习</div>${ps.map(practiceRow).join('')}`:''}${ss.length?`<div class="day-divider">热量</div>${ss.map(s=>snackRow(s)).join('')}`:''}</div>
+      <div class="entry-list">${parts.join('')}</div>
     </section>`;
   }).join('');
 }
@@ -642,7 +670,7 @@ function renderModal(){
         <span class="pick-name">${esc(e.name)} ${e.mode==='bodyweight'?'<span class="tag" style="--c:#9aa0a6">自重</span>':''}</span>
         <span class="pick-last">${e.lastSets?.length?`上次 ${e.lastSets.length} 组`:'未使用'}</span>
       </button>`).join('')
-      : `<div class="empty-mini">还没有器械。先去 <a data-act="tab" data-tab="library">器械库</a> 添加。</div>`;
+      : `<div class="empty-mini">还没有器械。先去 <a data-act="open-settings">器械库</a> 添加。</div>`;
     body = `<div class="modal-head"><span>选择器械</span><button class="x" data-act="close">×</button></div>
       <div class="modal-body"><input class="search" data-act="search-eq" placeholder="搜索器械…" autocomplete="off">
       <div class="pick-list">${list}</div></div>`;
@@ -827,7 +855,7 @@ function importData(e){
   const f = e.target.files[0]; if(!f) return;
   const r = new FileReader();
   r.onload = () => {
-    try { const d = JSON.parse(r.result); if(!Array.isArray(d.equipment)||!Array.isArray(d.entries)) throw 0; DB = d; migrate(); save(); state.popover=false; render(); toast('导入成功'); }
+    try { const d = JSON.parse(r.result); if(!Array.isArray(d.equipment)||!Array.isArray(d.entries)) throw 0; DB = d; migrate(); save(); render(); toast('导入成功'); }
     catch { toast('导入失败:文件格式错误'); }
   };
   r.readAsText(f); e.target.value='';
@@ -851,7 +879,9 @@ function onDocClick(e){
   }
   const a = t.dataset.act;
   switch(a){
-    case 'tab': state.tab=t.dataset.tab; state.popover=false; render(); break;
+    case 'tab': state.tab=t.dataset.tab; state.settingsOpen=false; render(); break;
+    case 'open-settings': state.settingsOpen=true; closeEditor(); render(); break;
+    case 'close-settings': state.settingsOpen=false; state.libEdit=null; state.libEditVals=null; render(); break;
     case 'new': openEditorNew(); break;
     case 'edit': openEditorEdit(t.dataset.id); break;
     case 'del-entry': if(confirm('删除这条记录?')){ DB.entries=DB.entries.filter(x=>x.id!==t.dataset.id); save(); render(); } break;
@@ -886,12 +916,12 @@ function onDocClick(e){
     case 'edit-mode': if(state.libEditVals)state.libEditVals.mode=t.dataset.m; t.parentNode.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on', c===t)); break;
     case 'del-eq': deleteEquipment(t.dataset.id); break;
     case 'load-samples': loadSamples(); break;
-    case 'popover': state.popover=!state.popover; render(); break;
     case 'range': state.range.kind=t.dataset.r; if(t.dataset.r==='custom' && !state.range.from){ state.range.from=todayStr(); state.range.to=todayStr(); } render(); break;
+    case 'hist-view': state.historyView=t.dataset.v; render(); break;
     case 'heat': { const cap=document.getElementById('heat-cap'); if(cap) cap.textContent=t.dataset.info; } break;
-    case 'export': exportData(); state.popover=false; render(); break;
+    case 'export': exportData(); break;
     case 'import': document.getElementById('import-file').click(); break;
-    case 'clear': if(confirm('清空所有数据?此操作不可恢复。')){ DB={equipment:[],entries:[],practice:[],snacks:[]}; save(); state.popover=false; render(); } break;
+    case 'clear': if(confirm('清空所有数据?此操作不可恢复。')){ DB={equipment:[],entries:[],practice:[],snacks:[]}; save(); render(); } break;
   }
 }
 function onDocInput(e){

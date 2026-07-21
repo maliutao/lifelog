@@ -73,6 +73,12 @@ body::after{
 .popover button{text-align:left;background:none;border:0;color:var(--text);padding:10px 12px;font:500 13px 'Archivo';border-radius:2px;cursor:pointer}
 .popover button:hover{background:var(--panel-2)}
 .popover button.danger{color:var(--danger)}
+.settings-title{font-family:'Big Shoulders Display';font-size:20px;font-weight:800;letter-spacing:.08em;flex:1;text-align:center}
+.settings-list{display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.settings-row{display:flex;justify-content:space-between;align-items:center;background:var(--panel);border:0;color:var(--text);padding:16px 16px;font:600 14px 'Archivo';cursor:pointer;text-align:left;transition:.15s}
+.settings-row:active{background:var(--panel-2)}
+.settings-row .dim{font:400 12px 'Archivo';color:var(--dim-2)}
+.settings-row.danger{color:var(--danger)}
 
 /* ---------- bottom navbar ---------- */
 .navbar{
@@ -140,7 +146,7 @@ section.reveal:nth-child(6){animation-delay:.32s}
 .btn.ghost{background:transparent}
 .btn.sm{padding:9px 12px;font-size:13px;min-height:38px}
 .fab{padding:13px 20px;font-weight:700}
-.icon-btn{background:var(--panel-2);border:1px solid var(--line-2);color:var(--text);font:600 13px 'Space Mono';padding:10px 14px;border-radius:var(--r);cursor:pointer;letter-spacing:.06em;min-height:40px}
+.icon-btn{background:var(--panel-2);border:1px solid var(--line-2);color:var(--text);font:600 13px 'Space Mono';padding:10px 14px;border-radius:var(--r);cursor:pointer;letter-spacing:.06em;min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .icon-btn:hover{border-color:var(--accent);color:var(--accent)}
 .link{background:none;border:0;color:var(--accent);font:600 13px 'Archivo';cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 
@@ -240,7 +246,7 @@ input::placeholder{color:var(--dim-2)}
 .sub-title em{font-style:normal;font-weight:500;color:var(--dim-2);letter-spacing:.04em;text-transform:none;font-family:'Archivo';font-size:12px}
 .sec-add{background:rgba(200,255,58,.12);border:1px solid rgba(200,255,58,.4);color:var(--accent);font:600 12px 'Archivo';padding:8px 13px;border-radius:20px;cursor:pointer;white-space:nowrap;transition:.15s}
 .sec-add:hover{background:rgba(200,255,58,.2)}
-.rpt-toggle{display:flex;gap:6px;margin-bottom:14px}
+.rpt-toggle{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
 .min-step{display:flex;align-items:center;justify-content:center;gap:8px;margin:6px 0 4px}
 .min-step .set-val{flex:0 0 96px;width:96px;font-size:24px}
 .day-divider{font:700 10px/1 'Space Mono';letter-spacing:.14em;color:var(--dim-2);margin:12px 0 6px;text-transform:uppercase}
