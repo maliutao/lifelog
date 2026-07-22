@@ -201,7 +201,7 @@ input::placeholder{color:var(--dim-2)}
 .vbar-val{font:700 9px/1 'Space Mono';color:var(--dim);margin-bottom:6px;white-space:nowrap;height:11px}
 .vbar-track{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center;min-height:0}
 .vbar{width:100%;max-width:28px;height:var(--h,0%);background:linear-gradient(180deg,var(--accent),var(--accent-d));border-radius:2px 2px 0 0;transform-origin:bottom;animation:barIn .6s cubic-bezier(.2,.8,.2,1) both;box-shadow:0 0 12px rgba(200,255,58,.25)}
-.vbar-lbl{font:400 8px/1 'Space Mono';color:var(--dim-2);margin-top:6px;white-space:nowrap}
+.vbar-lbl{font:400 8px/1 'Space Mono';color:var(--dim-2);margin-top:6px;height:8px;white-space:nowrap}
 @keyframes barIn{from{transform:scaleY(0)}to{transform:scaleY(1)}}
 
 .hbars{display:flex;flex-direction:column;gap:9px}
