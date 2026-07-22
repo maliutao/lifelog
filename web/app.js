@@ -598,17 +598,17 @@ function renderHistory(){
 }
 
 /* ---------- fitness editor modal ---------- */
-function defaultRow(q){
-  // 单组默认值:沿用上一次最后一组的次数/重量
+function defaultRow(q, dirty){
+  // 单组默认值:沿用上一次最后一组的次数/重量;dirty 标记本行是否已被用户确认/编辑
   if(q.lastSets && q.lastSets.length){
     const last = q.lastSets[q.lastSets.length-1];
-    return {reps:last.reps, weight:last.weight};
+    return {reps:last.reps, weight:last.weight, dirty};
   }
-  return {reps:12, weight: q.mode==='bodyweight' ? null : 30};
+  return {reps:12, weight: q.mode==='bodyweight' ? null : 30, dirty};
 }
 function defaultRows(q){
-  // 新建时默认 1 组(连续录入模式)
-  return [defaultRow(q)];
+  // 新建时默认 1 组(连续录入模式);选器械即视为确认这一组 -> dirty:true
+  return [defaultRow(q, true)];
 }
 function openEditorNew(){ state.editor = {mode:'new', equipmentId:null, date:todayStr(), eqMode:'weighted', rows:null}; state.practiceEditor=null; state.snackEditor=null; renderModal(); }
 function openEditorEdit(id){
@@ -618,10 +618,10 @@ function openEditorEdit(id){
   renderModal();
 }
 function closeEditor(){
-  // 连续录入中关闭:若有未保存的有效组,先保存
+  // 连续录入中关闭:只自动保存用户编辑过(dirty)的有效组,不保存重置出的待填默认行
   const ed = state.editor;
   if(ed && ed.inflight){
-    const sets = currentValidSets(ed);
+    const sets = ed.rows.filter(r=>r.dirty && (+r.reps||0)>0).map(r=>({ reps:Math.round(+r.reps||0), weight: ed.eqMode==='bodyweight' ? null : (+r.weight||0) }));
     if(sets.length){
       const q = eq(ed.equipmentId); const mode = q?.mode || ed.eqMode;
       const entry = DB.entries.find(x=>x.id===ed.entryId);
@@ -674,12 +674,13 @@ function rowStep(i, field, delta){
   const r = state.editor.rows[i]; if(!r) return;
   if(field==='reps') r.reps = Math.max(0, (+r.reps||0) + delta);
   else r.weight = Math.max(0, Math.round(((+r.weight||0) + delta*2.5)*10)/10);
+  r.dirty = true;
   const el = document.getElementById(`r-${field}-${i}`); if(el) el.value = r[field];
   updatePreview();
 }
 function addSet(){
   const ed = state.editor; const last = ed.rows[ed.rows.length-1];
-  ed.rows.push({ reps:12, weight: ed.eqMode==='bodyweight' ? null : (last?.weight ?? 30) });
+  ed.rows.push({ reps:12, weight: ed.eqMode==='bodyweight' ? null : (last?.weight ?? 30), dirty:false });
   renderSets();
 }
 function delSet(i){ state.editor.rows.splice(i,1); renderSets(); }
@@ -767,14 +768,15 @@ function saveSet(){
   }
   if(entry){ entry.sets.push(...sets); entry.date=ed.date; entry.mode=mode; if(q) q.lastSets = entry.sets.map(s=>({reps:s.reps,weight:s.weight})); }
   save();
-  // 重置为 1 行,沿用上一组重量
-  ed.rows = [defaultRow(q || {mode:ed.eqMode, lastSets:sets.map(s=>({reps:s.reps,weight:s.weight}))})];
+  // 重置为 1 行,沿用上一组重量(标记 dirty:false,完成/关闭时不当作有效组重复保存)
+  ed.rows = [defaultRow(q || {mode:ed.eqMode, lastSets:sets.map(s=>({reps:s.reps,weight:s.weight}))}, false)];
   renderModal();
 }
 function finishInflight(){
   const ed = state.editor; if(!ed) return;
-  const sets = currentValidSets(ed);
-  if(sets.length){ saveSet(); }
+  // 只在当前行被编辑过(dirty)且有效时保存,避免把重置出的待填默认行存进去
+  const cur = ed.rows[ed.rows.length-1];
+  if(cur && cur.dirty && (+cur.reps||0)>0){ saveSet(); }
   closeEditor(); render();
 }
 
@@ -1007,7 +1009,7 @@ function onDocInput(e){
   const sk = e.target.closest('#s-kj');
   if(sk && state.snackEditor){ state.snackEditor.kj = parseInt(sk.value)||0; updateSnackPreview(); return; }
   const sv = e.target.closest('.set-val');
-  if(sv){ const i=+sv.dataset.i, f=sv.dataset.field; const v=parseFloat(sv.value); const r=state.editor?.rows?.[i]; if(r && !isNaN(v)){ r[f]=v; updatePreview(); } return; }
+  if(sv){ const i=+sv.dataset.i, f=sv.dataset.field; const v=parseFloat(sv.value); const r=state.editor?.rows?.[i]; if(r && !isNaN(v)){ r[f]=v; r.dirty=true; updatePreview(); } return; }
   const s = e.target.closest('[data-act="search-eq"]');
   if(s){ const q=s.value.trim().toLowerCase(); document.querySelectorAll('#modal .pick-item').forEach(it=>{ it.style.display = it.dataset.name.toLowerCase().includes(q)?'':'none'; }); }
 }
