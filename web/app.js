@@ -10,7 +10,7 @@
 const KEY = 'liftlog.db.v1';
 let DB = load();
 migrate();
-const state = { tab:'record', editor:null, practiceEditor:null, snackEditor:null, settingsOpen:false, libEdit:null, libEditVals:null, newEq:{muscle:'胸', mode:'weighted'}, range:{kind:'all'}, reportsView:'fitness', historyView:'all' };
+const state = { tab:'record', editor:null, practiceEditor:null, snackEditor:null, settingsOpen:false, settingsExpand:{}, libEdit:null, libEditVals:null, newEq:{muscle:'胸', mode:'weighted'}, range:{kind:'all'}, reportsView:'fitness', historyView:'all' };
 
 /* ---------- storage ---------- */
 function load(){
@@ -70,6 +70,7 @@ function startOfWeek(d){ const x = new Date(d); x.setHours(0,0,0,0); const day =
 
 /* ---------- fitness aggregates ---------- */
 function sumVolume(fn){ return DB.entries.filter(fn).reduce((s,e)=>s+vol(e),0); }
+function sumSets(fn){ return DB.entries.filter(fn).reduce((s,e)=>s+totalSets(e),0); }
 function todayEntries(){ return DB.entries.filter(e=>e.date===todayStr()).sort((a,b)=>a.createdAt-b.createdAt); }
 function thisWeekRange(){ const s = startOfWeek(new Date(todayStr()+'T00:00:00')); const e = new Date(s); e.setDate(e.getDate()+6); return [s,e]; }
 function periodVolume(kind){
@@ -82,6 +83,24 @@ function dailySeries(n){
   const out=[]; const t=new Date(todayStr()+'T00:00:00');
   for(let i=n-1;i>=0;i--){ const d=new Date(t); d.setDate(d.getDate()-i); const s=fmt(d); out.push({label:fmtShort(s), value:sumVolume(e=>e.date===s)}); }
   return out;
+}
+function periodSets(kind){
+  if(kind==='today') return sumSets(e=>e.date===todayStr());
+  if(kind==='week'){ const [s,e]=thisWeekRange(); return sumSets(en=>{const d=new Date(en.date+'T00:00:00'); return d>=s&&d<=e;}); }
+  const n=new Date(), s=new Date(n.getFullYear(),n.getMonth(),1), e=new Date(n.getFullYear(),n.getMonth()+1,0);
+  return sumSets(en=>{const d=new Date(en.date+'T00:00:00'); return d>=s&&d<=e;});
+}
+function dailySetsSeries(n){
+  const out=[]; const t=new Date(todayStr()+'T00:00:00');
+  for(let i=n-1;i>=0;i--){ const d=new Date(t); d.setDate(d.getDate()-i); const s=fmt(d); out.push({label:fmtShort(s), value:sumSets(e=>e.date===s)}); }
+  return out;
+}
+function fitnessStreak(){
+  const set=new Set(DB.entries.map(e=>e.date));
+  let streak=0; const d=new Date(todayStr()+'T00:00:00');
+  if(!set.has(fmt(d))) d.setDate(d.getDate()-1);
+  while(set.has(fmt(d))){ streak++; d.setDate(d.getDate()-1); }
+  return streak;
 }
 /* range filter for fitness breakdowns (按器械 / 按部位) */
 function inRange(dateStr){
@@ -106,12 +125,20 @@ function byEquipmentKg(){
   const m={}; DB.entries.filter(e=>e.mode!=='bodyweight' && inRange(e.date)).forEach(e=>{ m[e.equipmentId]=(m[e.equipmentId]||0)+vol(e); });
   return Object.entries(m).map(([id,v])=>({label:eq(id)?.name||'已删除', value:v})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
 }
+function byEquipmentSets(){
+  const m={}; DB.entries.filter(e=>inRange(e.date)).forEach(e=>{ m[e.equipmentId]=(m[e.equipmentId]||0)+totalSets(e); });
+  return Object.entries(m).map(([id,v])=>({label:eq(id)?.name||'已删除', value:v})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
+}
 function byEquipmentReps(){
   const m={}; DB.entries.filter(e=>e.mode==='bodyweight' && inRange(e.date)).forEach(e=>{ m[e.equipmentId]=(m[e.equipmentId]||0)+totalReps(e); });
   return Object.entries(m).map(([id,v])=>({label:eq(id)?.name||'已删除', value:v})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
 }
 function byMuscle(){
   const m={}; DB.entries.filter(e=>e.mode!=='bodyweight' && inRange(e.date)).forEach(e=>{ const g=eq(e.equipmentId)?.muscle||'其他'; m[g]=(m[g]||0)+vol(e); });
+  return Object.entries(m).map(([g,v])=>({label:g, value:v})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
+}
+function byMuscleSets(){
+  const m={}; DB.entries.filter(e=>inRange(e.date)).forEach(e=>{ const g=eq(e.equipmentId)?.muscle||'其他'; m[g]=(m[g]||0)+totalSets(e); });
   return Object.entries(m).map(([g,v])=>({label:g, value:v})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
 }
 
@@ -127,6 +154,11 @@ function practicePeriod(kind){
 function practiceDailySeries(n){
   const out=[]; const t=new Date(todayStr()+'T00:00:00');
   for(let i=n-1;i>=0;i--){ const d=new Date(t); d.setDate(d.getDate()-i); const s=fmt(d); out.push({label:fmtShort(s), value:practiceSum(p=>p.date===s)}); }
+  return out;
+}
+function practiceDailyHoursSeries(n){
+  const out=[]; const t=new Date(todayStr()+'T00:00:00');
+  for(let i=n-1;i>=0;i--){ const d=new Date(t); d.setDate(d.getDate()-i); const s=fmt(d); out.push({label:fmtShort(s), value:+(practiceSum(p=>p.date===s)/60).toFixed(2)}); }
   return out;
 }
 function practiceStreak(){
@@ -214,11 +246,11 @@ function heatColor(sets){
   if(sets<=9) return 'rgba(200,255,58,.7)';
   return 'rgba(200,255,58,.95)';
 }
-function minColor(m){
-  if(m<=0) return '#171b21';
-  if(m<=15) return 'rgba(200,255,58,.22)';
-  if(m<=30) return 'rgba(200,255,58,.45)';
-  if(m<=45) return 'rgba(200,255,58,.7)';
+function hourColor(h){
+  if(h<=0) return '#171b21';
+  if(h<=0.25) return 'rgba(200,255,58,.22)';
+  if(h<=0.5) return 'rgba(200,255,58,.45)';
+  if(h<=1) return 'rgba(200,255,58,.7)';
   return 'rgba(200,255,58,.95)';
 }
 function heatGrid({valueFn, colorFn, titleFn}){
@@ -258,9 +290,9 @@ function practiceHeatmap(){
   const map={};
   DB.practice.forEach(p=>{ map[p.date]=(map[p.date]||0)+(+p.minutes||0); });
   return heatGrid({
-    valueFn: ds => map[ds]||0,
-    colorFn: minColor,
-    titleFn: (ds,v) => v>0 ? `${ds} · ${v} 分钟` : `${ds} · 休息`
+    valueFn: ds => +((map[ds]||0)/60).toFixed(2),
+    colorFn: hourColor,
+    titleFn: (ds,v) => v>0 ? `${ds} · ${v} h` : `${ds} · 休息`
   });
 }
 function kjToKcal(k){ return Math.round((+k||0)/4.184); }
@@ -336,29 +368,27 @@ function entrySummary(e){
 function entryRow(e){
   const q = eq(e.equipmentId);
   const s = entrySummary(e);
-  return `<div class="entry">
-    <div class="entry-main">
-      <div class="entry-name">${esc(q?.name||'已删除')}<span class="tag" style="--c:${groupColor(q?.muscle||'其他')}">${esc(q?.muscle||'其他')}</span>${e.mode==='bodyweight'?'<span class="tag" style="--c:#9aa0a6">自重</span>':''}</div>
-      <div class="entry-meta">${s.meta}</div>
+  return `<div class="entry-swipe" data-id="${e.id}">
+    <div class="entry" data-act="edit" data-id="${e.id}">
+      <div class="entry-main">
+        <div class="entry-name">${esc(q?.name||'已删除')}<span class="tag" style="--c:${groupColor(q?.muscle||'其他')}">${esc(q?.muscle||'其他')}</span>${e.mode==='bodyweight'?'<span class="tag" style="--c:#9aa0a6">自重</span>':''}</div>
+        <div class="entry-meta">${s.meta}</div>
+      </div>
+      <div class="entry-vol">${s.vol}<span>${s.volUnit}</span></div>
     </div>
-    <div class="entry-vol">${s.vol}<span>${s.volUnit}</span></div>
-    <div class="entry-act">
-      <button data-act="edit" data-id="${e.id}">改</button>
-      <button data-act="del-entry" data-id="${e.id}">删</button>
-    </div>
+    <button class="entry-del" data-act="del-entry" data-id="${e.id}">删除</button>
   </div>`;
 }
 function practiceRow(p){
-  return `<div class="entry">
-    <div class="entry-main">
-      <div class="entry-name">吉他练习<span class="tag" style="--c:#3cb8ff">练习</span></div>
-      <div class="entry-meta">${p.note?esc(p.note):'今日练习'}</div>
+  return `<div class="entry-swipe" data-id="${p.id}">
+    <div class="entry" data-act="edit-practice" data-id="${p.id}">
+      <div class="entry-main">
+        <div class="entry-name">吉他练习<span class="tag" style="--c:#3cb8ff">练习</span></div>
+        <div class="entry-meta">${p.note?esc(p.note):'今日练习'}</div>
+      </div>
+      <div class="entry-vol">${p.minutes}<span>分</span></div>
     </div>
-    <div class="entry-vol">${p.minutes}<span>分</span></div>
-    <div class="entry-act">
-      <button data-act="edit-practice" data-id="${p.id}">改</button>
-      <button data-act="del-practice" data-id="${p.id}">删</button>
-    </div>
+    <button class="entry-del" data-act="del-practice" data-id="${p.id}">删除</button>
   </div>`;
 }
 function snackRow(s, {dual=false}={}){
@@ -366,16 +396,15 @@ function snackRow(s, {dual=false}={}){
   const vol = dual
     ? `${fmtNum(s.kj)}<span>kJ</span><small style="display:block;font-size:10px;color:var(--dim);font-family:'Space Mono',monospace">≈${kcal} kcal</small>`
     : `${fmtNum(kcal)}<span>kcal</span>`;
-  return `<div class="entry">
-    <div class="entry-main">
-      <div class="entry-name">${esc(s.name)}<span class="tag" style="--c:#ff7a3c">热量</span></div>
-      <div class="entry-meta">${s.note?esc(s.note):'热量记录'}</div>
+  return `<div class="entry-swipe" data-id="${s.id}">
+    <div class="entry" data-act="edit-snack" data-id="${s.id}">
+      <div class="entry-main">
+        <div class="entry-name">${esc(s.name)}<span class="tag" style="--c:#ff7a3c">热量</span></div>
+        <div class="entry-meta">${s.note?esc(s.note):'热量记录'}</div>
+      </div>
+      <div class="entry-vol">${vol}</div>
     </div>
-    <div class="entry-vol">${vol}</div>
-    <div class="entry-act">
-      <button data-act="edit-snack" data-id="${s.id}">改</button>
-      <button data-act="del-snack" data-id="${s.id}">删</button>
-    </div>
+    <button class="entry-del" data-act="del-snack" data-id="${s.id}">删除</button>
   </div>`;
 }
 function renderRecord(){
@@ -446,7 +475,6 @@ function eqRow(e, editing){
 }
 function equipmentSection(){
   return `
-  <section class="reveal">
     <div class="sec-title">新增器械</div>
     <div class="add-eq">
       <input id="new-eq-name" placeholder="器械名称(如 胸部推举机)" autocomplete="off">
@@ -462,28 +490,32 @@ function equipmentSection(){
       <button class="btn primary" data-act="add-eq" style="width:100%">添加</button>
     </div>
     <div class="hint">「自重」类(如俯卧撑)不记重量,按次数统计。</div>
-  </section>
-  <section class="reveal">
-    <div class="sec-title">器械库<span class="sec-sub">${DB.equipment.length} 项</span></div>
+    <div class="sec-title" style="margin-top:20px">器械库</div>
     ${DB.equipment.length
       ? `<div class="eq-list">${DB.equipment.map(e=>eqRow(e, state.libEdit===e.id)).join('')}</div>`
-      : `<div class="empty">还没有器械。<button class="link" data-act="load-samples">载入常用示例</button> 或 在上方添加</div>`}
-  </section>`;
+      : `<div class="empty">还没有器械。<button class="link" data-act="load-samples">载入常用示例</button> 或 在上方添加</div>`}`;
 }
 
 /* ---------- settings view ---------- */
+function settingsGroup(key, title, inner){
+  const open = !!state.settingsExpand[key];
+  return `<div class="settings-group reveal">
+    <button class="settings-group-head" data-act="toggle-settings" data-key="${key}">
+      <span>${title}</span>
+      <svg class="arrow ${open?'open':''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+    </button>
+    <div class="settings-group-body ${open?'':'hidden'}">${inner}</div>
+  </div>`;
+}
 function renderSettings(){
-  return `
-  ${equipmentSection()}
-  <section class="reveal">
-    <div class="sec-title">数据管理</div>
+  return settingsGroup('equipment', `器械管理<span class="sec-sub">${DB.equipment.length} 项</span>`, equipmentSection())
+       + settingsGroup('data', '数据管理', `
     <div class="settings-list">
       <button class="settings-row" data-act="export"><span>导出 JSON 备份</span><span class="dim">下载全部数据</span></button>
       <button class="settings-row" data-act="import"><span>导入 JSON</span><span class="dim">从备份文件恢复</span></button>
       <button class="settings-row danger" data-act="clear"><span>清空所有数据</span><span class="dim">不可恢复</span></button>
     </div>
-    <div class="hint">数据存于浏览器 localStorage,导出的 JSON 文件可作备份。</div>
-  </section>`;
+    <div class="hint">数据存于浏览器 localStorage,导出的 JSON 文件可作备份。</div>`);
 }
 
 /* ---------- reports view ---------- */
@@ -494,61 +526,62 @@ function renderReports(){
 function fitnessReports(){
   const bwReps = byEquipmentReps();
   const rl = rangeLabel();
+  const totalDays = new Set(DB.entries.map(e=>e.date)).size;
+  const totalHours = (totalDays * 0.5).toFixed(1);
   return `
   <section class="reveal">
     <div class="stat-row">
-      ${statCard('今日', fmtNum(periodVolume('today')), 'kg')}
-      ${statCard('本周', fmtNum(periodVolume('week')), 'kg')}
-      ${statCard('本月', fmtNum(periodVolume('month')), 'kg')}
+      ${statCard('今日', periodSets('today'), '组')}
+      ${statCard('本周', periodSets('week'), '组')}
+      ${statCard('本月', periodSets('month'), '组')}
     </div>
   </section>
-  <section class="reveal"><div class="sec-title">近 14 天 · 每日训练量</div>${vbars(dailySeries(14))}</section>
+  <section class="reveal">
+    <div class="stat-row">
+      ${statCard('连续打卡', fitnessStreak(), '天')}
+      ${statCard('总天数', totalDays, '天')}
+      ${statCard('总时长', totalHours, 'h')}
+    </div>
+  </section>
+  <section class="reveal"><div class="sec-title">近 14 天 · 每日组数</div>${vbars(dailySetsSeries(14))}</section>
   <section class="reveal"><div class="sec-title">训练热力图 · 近 6 月<span class="sec-sub">颜色 = 当天组数</span></div>${fitnessHeatmap()}</section>
   <section class="reveal">
     <div class="sec-title">区间统计<span class="sec-sub">${rl}</span></div>
     ${rangeBar()}
   </section>
-  <section class="reveal"><div class="sec-title">按器械 · 训练量 (kg)<span class="sec-sub">${rl}</span></div>${hbars(byEquipmentKg())}</section>
+  <section class="reveal"><div class="sec-title">按器械 · 组数<span class="sec-sub">${rl}</span></div>${hbars(byEquipmentSets())}</section>
   ${bwReps.length?`<section class="reveal"><div class="sec-title">按器械 · 自重次数<span class="sec-sub">${rl}</span></div>${hbars(bwReps)}</section>`:''}
-  <section class="reveal"><div class="sec-title">按部位 · 训练量分布 (kg)<span class="sec-sub">${rl}</span></div>${donut(byMuscle())}</section>`;
+  <section class="reveal"><div class="sec-title">按部位 · 组数分布<span class="sec-sub">${rl}</span></div>${donut(byMuscleSets())}</section>`;
 }
 function practiceReports(){
   const totalDays = new Set(DB.practice.map(p=>p.date)).size;
   const totalMin = DB.practice.reduce((s,p)=>s+(+p.minutes||0),0);
+  const totalHrs = (totalMin/60).toFixed(1);
   return `
   <section class="reveal">
     <div class="stat-row">
-      ${statCard('今日', practicePeriod('today'), '分')}
-      ${statCard('本周', practicePeriod('week'), '分')}
-      ${statCard('本月', practicePeriod('month'), '分')}
+      ${statCard('今日', (practicePeriod('today')/60).toFixed(1), 'h')}
+      ${statCard('本周', (practicePeriod('week')/60).toFixed(1), 'h')}
+      ${statCard('本月', (practicePeriod('month')/60).toFixed(1), 'h')}
     </div>
   </section>
   <section class="reveal">
     <div class="stat-row">
       ${statCard('连续打卡', practiceStreak(), '天')}
       ${statCard('总天数', totalDays, '天')}
-      ${statCard('总时长', fmtNum(totalMin), '分')}
+      ${statCard('总时长', totalHrs, 'h')}
     </div>
   </section>
-  <section class="reveal"><div class="sec-title">近 14 天 · 每日练习时长</div>${vbars(practiceDailySeries(14))}</section>
-  <section class="reveal"><div class="sec-title">练习热力图 · 近 6 月<span class="sec-sub">颜色 = 当天分钟</span></div>${practiceHeatmap()}</section>`;
+  <section class="reveal"><div class="sec-title">近 14 天 · 每日练习时长</div>${vbars(practiceDailyHoursSeries(14))}</section>
+  <section class="reveal"><div class="sec-title">练习热力图 · 近 6 月<span class="sec-sub">颜色 = 当天时长</span></div>${practiceHeatmap()}</section>`;
 }
 function snackReports(){
-  const totalDays = new Set(DB.snacks.map(s=>s.date)).size;
-  const totalKcal = kjToKcal(DB.snacks.reduce((s,x)=>s+(+x.kj||0),0));
   return `
   <section class="reveal">
     <div class="stat-row">
       ${statCard('今日', fmtNum(snackPeriod('today')), 'kcal')}
       ${statCard('本周', fmtNum(snackPeriod('week')), 'kcal')}
       ${statCard('本月', fmtNum(snackPeriod('month')), 'kcal')}
-    </div>
-  </section>
-  <section class="reveal">
-    <div class="stat-row">
-      ${statCard('连续打卡', snackStreak(), '天')}
-      ${statCard('总天数', totalDays, '天')}
-      ${statCard('总热量', fmtNum(totalKcal), 'kcal')}
     </div>
   </section>
   <section class="reveal"><div class="sec-title">近 14 天 · 每日热量</div>${vbars(snackDailySeries(14))}</section>
@@ -918,13 +951,13 @@ function loadSamples(){
 function exportData(){
   const json = JSON.stringify(DB,null,2);
   const fname = `lifelog-${todayStr()}.json`;
-  /* Android WebView: use Web Share API (native share sheet) */
-  if(navigator.canShare && navigator.canShare({files:[new File([new Blob([json],{type:'application/json'})],fname)]})){
+  /* Android WebView (Capacitor): use Web Share API */
+  if(window.Capacitor && navigator.canShare && navigator.canShare({files:[new File([new Blob([json],{type:'application/json'})],fname)]})){
     const file = new File([new Blob([json],{type:'application/json'})], fname);
     navigator.share({files:[file],title:'LIFELOG 备份'}).catch(()=>{});
     return;
   }
-  /* Desktop fallback: <a download> click */
+  /* Desktop / browser fallback: <a download> click */
   const blob = new Blob([json], {type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = fname;
@@ -951,6 +984,12 @@ function toast(msg){
 
 /* ---------- events ---------- */
 function onDocClick(e){
+  /* if tapping a swiped-open row, just close it */
+  if(swipedEl){
+    const sw = e.target.closest('.entry-swipe');
+    if(sw === swipedEl){ closeSwipe(); e.stopPropagation(); return; }
+    closeSwipe();
+  }
   const t = e.target.closest('[data-act]');
   if(!t){
     if(e.target.closest('.sheet')) return;
@@ -1011,6 +1050,7 @@ function onDocClick(e){
     case 'export': exportData(); break;
     case 'import': document.getElementById('import-file').click(); break;
     case 'clear': if(confirm('清空所有数据?此操作不可恢复。')){ DB={equipment:[],entries:[],practice:[],snacks:[]}; save(); render(); } break;
+    case 'toggle-settings': state.settingsExpand[t.dataset.key]=!state.settingsExpand[t.dataset.key]; render(); break;
   }
 }
 function onDocInput(e){
@@ -1035,5 +1075,46 @@ document.addEventListener('input', onDocInput);
 document.addEventListener('change', onDocChange);
 document.getElementById('import-file').addEventListener('change', importData);
 document.addEventListener('keydown', e=>{ if(e.key==='Escape' && (state.editor||state.practiceEditor||state.snackEditor)) closeEditor(); });
+
+/* ---------- swipe-to-delete ---------- */
+let swipedEl = null;
+let swipeStartX = 0, swipeStartY = 0, swipeEntry = null, swipeMoved = false;
+const SWIPE_W = 70;
+
+function closeSwipe(){
+  if(swipedEl){ swipedEl.querySelector('.entry').style.transform=''; swipedEl=null; }
+}
+document.addEventListener('touchstart', e=>{
+  const sw = e.target.closest('.entry-swipe');
+  if(!sw) { closeSwipe(); return; }
+  closeSwipe();
+  swipeStartX = e.touches[0].clientX;
+  swipeStartY = e.touches[0].clientY;
+  swipeEntry = sw.querySelector('.entry');
+  swipeMoved = false;
+}, {passive:true});
+document.addEventListener('touchmove', e=>{
+  if(!swipeEntry) return;
+  const dx = e.touches[0].clientX - swipeStartX;
+  const dy = e.touches[0].clientY - swipeStartY;
+  if(Math.abs(dy) > Math.abs(dx)) { swipeEntry=null; return; }
+  if(dx < 0){
+    swipeMoved = true;
+    swipeEntry.style.transition='none';
+    swipeEntry.style.transform=`translateX(${Math.max(dx,-SWIPE_W)}px)`;
+  }
+}, {passive:true});
+document.addEventListener('touchend', e=>{
+  if(!swipeEntry) return;
+  swipeEntry.style.transition='';
+  const dx = e.changedTouches[0].clientX - swipeStartX;
+  if(dx < -SWIPE_W/2){
+    swipeEntry.style.transform=`translateX(-${SWIPE_W}px)`;
+    swipedEl = swipeEntry.closest('.entry-swipe');
+  } else {
+    swipeEntry.style.transform='';
+  }
+  swipeEntry=null;
+});
 
 render();

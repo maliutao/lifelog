@@ -79,6 +79,14 @@ body::after{
 .settings-row:active{background:var(--panel-2)}
 .settings-row .dim{font:400 12px 'Archivo';color:var(--dim-2)}
 .settings-row.danger{color:var(--danger)}
+.settings-group{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:12px}
+.settings-group-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--panel-2);cursor:pointer;font:700 14px 'Archivo';color:var(--text);border:0;width:100%;text-align:left;transition:background .15s}
+.settings-group-head:active{background:var(--panel)}
+.settings-group-head .arrow{transition:transform .25s;color:var(--dim);flex-shrink:0}
+.settings-group-head .arrow.open{transform:rotate(90deg)}
+.settings-group-head .sec-sub{margin-left:8px}
+.settings-group-body{padding:14px 16px}
+.settings-group-body.hidden{display:none}
 
 /* ---------- bottom navbar ---------- */
 .navbar{
@@ -155,19 +163,18 @@ section.reveal:nth-child(6){animation-delay:.32s}
 
 /* ---------- entries ---------- */
 .entry-list{display:flex;flex-direction:column;gap:8px}
-.entry{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:13px 14px;transition:.15s}
-.entry:hover{border-color:var(--line-2)}
+.entry-swipe{position:relative;overflow:hidden;border-radius:var(--r)}
+.entry{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:13px 14px;transition:transform .2s ease;cursor:pointer;position:relative;z-index:1}
+.entry:active{background:var(--panel-2)}
 .entry-main{flex:1;min-width:0}
 .entry-name{font:600 16px 'Archivo';display:flex;align-items:center;gap:8px}
 .entry-meta{font:500 12px 'Space Mono';color:var(--dim);margin-top:5px;letter-spacing:.04em}
 .entry-vol{font:800 20px 'Big Shoulders Display';text-align:right}
 .entry-vol span{font:500 10px 'Archivo';color:var(--dim);margin-left:3px}
-.entry-act{display:flex;gap:6px}
-.entry-act button{background:none;border:1px solid var(--line-2);color:var(--dim);width:38px;height:38px;border-radius:2px;cursor:pointer;font-size:13px}
-.entry-act button:hover{color:var(--accent);border-color:var(--accent)}
+.entry-del{position:absolute;right:0;top:0;bottom:0;width:70px;background:var(--danger);color:#fff;border:0;font:700 14px 'Archivo';cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:0 var(--r) var(--r) 0}
 
 /* ---------- empty ---------- */
-.empty{background:var(--panel);border:1px dashed var(--line-2);border-radius:var(--r);padding:34px 18px;text-align:center;color:var(--dim);font-size:14px}
+.empty{padding:20px 0;text-align:center;color:var(--dim-2);font-size:13px}
 .empty-mini{padding:24px 14px;text-align:center;color:var(--dim);font-size:14px}
 .empty-mini a{color:var(--accent);cursor:pointer;text-decoration:underline}
 
