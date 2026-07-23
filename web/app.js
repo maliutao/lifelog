@@ -916,9 +916,19 @@ function loadSamples(){
 
 /* ---------- data menu ---------- */
 function exportData(){
-  const blob = new Blob([JSON.stringify(DB,null,2)], {type:'application/json'});
+  const json = JSON.stringify(DB,null,2);
+  const fname = `lifelog-${todayStr()}.json`;
+  /* Android WebView: use Web Share API (native share sheet) */
+  if(navigator.canShare && navigator.canShare({files:[new File([new Blob([json],{type:'application/json'})],fname)]})){
+    const file = new File([new Blob([json],{type:'application/json'})], fname);
+    navigator.share({files:[file],title:'LIFELOG 备份'}).catch(()=>{});
+    return;
+  }
+  /* Desktop fallback: <a download> click */
+  const blob = new Blob([json], {type:'application/json'});
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = `lifelog-${todayStr()}.json`; a.click();
+  a.href = URL.createObjectURL(blob); a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(a.href);
 }
 function importData(e){
