@@ -253,10 +253,6 @@ input::placeholder{color:var(--dim-2)}
 .sub-title em{font-style:normal;font-weight:500;color:var(--dim-2);letter-spacing:.04em;text-transform:none;font-family:'Archivo';font-size:12px}
 .sec-add{background:rgba(200,255,58,.12);border:1px solid rgba(200,255,58,.4);color:var(--accent);font:600 12px 'Archivo';padding:8px 13px;border-radius:20px;cursor:pointer;white-space:nowrap;transition:.15s}
 .sec-add:hover{background:rgba(200,255,58,.2)}
-.rpt-toggle{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
-.min-step{display:flex;align-items:center;justify-content:center;gap:8px;margin:6px 0 4px}
-.min-step .set-val{flex:0 0 96px;width:96px;font-size:24px}
-.day-divider{font:700 10px/1 'Space Mono';letter-spacing:.14em;color:var(--dim-2);margin:12px 0 6px;text-transform:uppercase}
 .field input[type=text]{flex:1;min-width:0}
 
 /* ---------- modal (hidden by default — fixes the "blurry overlay" bug) ---------- */
@@ -277,11 +273,9 @@ input::placeholder{color:var(--dim-2)}
 .modal-head .x:hover{color:var(--accent)}
 .modal-body{padding:18px}
 .search{width:100%;margin-bottom:12px}
-.pick-list{display:flex;flex-direction:column;gap:6px}
-.pick-item{display:flex;align-items:center;gap:10px;text-align:left;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:14px 14px;border-radius:var(--r);cursor:pointer;transition:.15s;min-height:48px}
-.pick-item:hover{border-color:var(--accent)}
-.pick-name{font:600 15px 'Archivo';flex:1}
-.pick-last{font:500 11px 'Space Mono';color:var(--dim-2)}
+.eq-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.eq-chip{font:600 14px 'Archivo';padding:10px 16px;color:var(--text)}
+.eq-chip:hover{border-color:var(--accent);color:var(--accent)}
 .ed-eq{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--r);padding:13px 14px;margin-bottom:16px}
 .ed-eq-name{font:700 17px 'Archivo'}
 .field{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}

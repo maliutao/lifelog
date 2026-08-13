@@ -1,6 +1,6 @@
 # LIFELOG · 生活日志
 
-纯前端个人生活记录 App（健身 + 吉他 + 热量），Capacitor 打包 Android APK。
+纯前端健身记录 App，Capacitor 打包 Android APK。
 
 ## 技术栈
 
@@ -29,11 +29,9 @@ capacitor.config.json   appId=com.lifelog.app, webDir=web
 ```
 equipment: { id, name, muscle, mode:'weighted'|'bodyweight', lastSets:[{reps,weight}]|null }
 entries:   { id, date, equipmentId, mode, sets:[{reps,weight}], createdAt }
-practice:  { id, date, minutes, note, createdAt }
-snacks:    { id, date, name, kj, note, createdAt }
 ```
 
-DB = `{ equipment, entries, practice, snacks }`
+DB = `{ equipment, entries }`
 
 ## 常用命令
 
@@ -54,9 +52,8 @@ python -m http.server 8000 --directory web
 ## 开发注意事项
 
 - app.js 是单文件包含全部逻辑，修改时注意搜索定位
-- 热量模块：输入用 kJ（步进 ±10），显示统计用 kcal（`kcal = round(kJ / 4.184)`）
 - 自重器械（mode='bodyweight'）不记重量，按次数统计
 - 周 = 周一~周日，月 = 自然月
-- 热力图颜色：训练=绿色（组数）、练习=绿色（分钟）、热量=橙色 #ff7a3c（kcal）
+- 热力图颜色：训练=绿色（组数）
 - 14 天柱图横轴从今天往回每 3 天标一个日期
 - npm 镜像：.npmrc 配置了 npmmirror
