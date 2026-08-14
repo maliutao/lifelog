@@ -2,7 +2,8 @@
    LIFELOG · 生活日志  -  纯前端 / localStorage
    数据模型:
      equipment: { id, name, lastSets:[{reps,weight}]|null }
-     entries:   { id, date, equipmentId, muscle, mode, sets:[{reps,weight}], createdAt }
+     entries:   { id, date, equipmentId, muscle, mode:'weighted'|'bodyweight'|'assisted', sets:[{reps,weight}], createdAt }
+     mode: weighted=有重量 / bodyweight=自重(weight=null) / assisted=配重(weight=配重kg,越大越轻松,不计入kg训练量)
    ============================================================ */
 
 const KEY = 'liftlog.db.v1';
@@ -53,7 +54,7 @@ const fmtNum = n => Math.round(n).toLocaleString();
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const eq = id => DB.equipment.find(e => e.id === id);
-const vol = e => (!e || !Array.isArray(e.sets) || e.mode==='bodyweight') ? 0 : e.sets.reduce((s,st)=>s + (st.reps||0)*(st.weight||0), 0);
+const vol = e => (!e || !Array.isArray(e.sets) || e.mode!=='weighted') ? 0 : e.sets.reduce((s,st)=>s + (st.reps||0)*(st.weight||0), 0);
 const totalReps = e => Array.isArray(e?.sets) ? e.sets.reduce((s,st)=>s+(st.reps||0),0) : 0;
 const totalSets = e => Array.isArray(e?.sets) ? e.sets.length : 0;
 function startOfWeek(d){ const x = new Date(d); x.setHours(0,0,0,0); const day = (x.getDay()+6)%7; x.setDate(x.getDate()-day); return x; }
@@ -112,7 +113,7 @@ function rangeBar(){
     + (r.kind==='custom'?`<div class="range-custom"><input type="date" id="r-from" value="${r.from||todayStr()}"><span>-</span><input type="date" id="r-to" value="${r.to||todayStr()}"></div>`:'');
 }
 function byEquipmentKg(){
-  const m={}; DB.entries.filter(e=>e.mode!=='bodyweight' && inRange(e.date)).forEach(e=>{ m[e.equipmentId]=(m[e.equipmentId]||0)+vol(e); });
+  const m={}; DB.entries.filter(e=>e.mode==='weighted' && inRange(e.date)).forEach(e=>{ m[e.equipmentId]=(m[e.equipmentId]||0)+vol(e); });
   return Object.entries(m).map(([id,v])=>({label:eq(id)?.name||'已删除', value:v})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
 }
 function byEquipmentSets(){
@@ -120,11 +121,11 @@ function byEquipmentSets(){
   return Object.entries(m).map(([id,v])=>({label:eq(id)?.name||'已删除', value:v})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
 }
 function byEquipmentReps(){
-  const m={}; DB.entries.filter(e=>e.mode==='bodyweight' && inRange(e.date)).forEach(e=>{ m[e.equipmentId]=(m[e.equipmentId]||0)+totalReps(e); });
+  const m={}; DB.entries.filter(e=>e.mode!=='weighted' && inRange(e.date)).forEach(e=>{ m[e.equipmentId]=(m[e.equipmentId]||0)+totalReps(e); });
   return Object.entries(m).map(([id,v])=>({label:eq(id)?.name||'已删除', value:v})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
 }
 function byMuscle(){
-  const m={}; DB.entries.filter(e=>e.mode!=='bodyweight' && inRange(e.date)).forEach(e=>{ const g=e.muscle||'其他'; m[g]=(m[g]||0)+vol(e); });
+  const m={}; DB.entries.filter(e=>e.mode==='weighted' && inRange(e.date)).forEach(e=>{ const g=e.muscle||'其他'; m[g]=(m[g]||0)+vol(e); });
   return Object.entries(m).map(([g,v])=>({label:g, value:v})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
 }
 function byMuscleSets(){
@@ -268,6 +269,11 @@ function entrySummary(e){
   if(e.mode==='bodyweight'){
     return {meta:`${reps.join('/')} 次 · ${sets} 组`, vol:String(repsTotal), volUnit:'次'};
   }
+  if(e.mode==='assisted'){
+    const weights = e.sets.map(s=>s.weight||0);
+    const wInfo = weights.every(w=>w===weights[0]) ? `${weights[0]} kg` : `${Math.min(...weights)}–${Math.max(...weights)} kg`;
+    return {meta:`${reps.join('/')} 次 @ ${wInfo}配重 · ${sets} 组`, vol:String(repsTotal), volUnit:'次'};
+  }
   const weights = e.sets.map(s=>s.weight||0);
   const wInfo = weights.every(w=>w===weights[0]) ? `${weights[0]} kg` : `${Math.min(...weights)}–${Math.max(...weights)} kg`;
   return {meta:`${reps.join('/')} 次 @ ${wInfo} · ${sets} 组`, vol:fmtNum(vol(e)), volUnit:'kg'};
@@ -278,7 +284,7 @@ function entryRow(e){
   return `<div class="entry-swipe" data-id="${e.id}">
     <div class="entry" data-act="edit" data-id="${e.id}">
       <div class="entry-main">
-        <div class="entry-name">${esc(q?.name||'已删除')}<span class="tag" style="--c:${groupColor(e.muscle||'其他')}">${esc(e.muscle||'其他')}</span>${e.mode==='bodyweight'?'<span class="tag" style="--c:#9aa0a6">自重</span>':''}</div>
+        <div class="entry-name">${esc(q?.name||'已删除')}<span class="tag" style="--c:${groupColor(e.muscle||'其他')}">${esc(e.muscle||'其他')}</span>${e.mode==='bodyweight'?'<span class="tag" style="--c:#9aa0a6">自重</span>':''}${e.mode==='assisted'?'<span class="tag" style="--c:#4ade80">配重</span>':''}</div>
         <div class="entry-meta">${s.meta}</div>
       </div>
       <div class="entry-vol">${s.vol}<span>${s.volUnit}</span></div>
@@ -396,7 +402,7 @@ function fitnessReports(){
     ${rangeBar()}
   </section>
   <section class="reveal"><div class="sec-title">按器械 · 组数<span class="sec-sub">${rl}</span></div>${hbars(byEquipmentSets())}</section>
-  ${bwReps.length?`<section class="reveal"><div class="sec-title">按器械 · 自重次数<span class="sec-sub">${rl}</span></div>${hbars(bwReps)}</section>`:''}
+  ${bwReps.length?`<section class="reveal"><div class="sec-title">按器械 · 自重/配重次数<span class="sec-sub">${rl}</span></div>${hbars(bwReps)}</section>`:''}
   <section class="reveal"><div class="sec-title">按部位 · 组数分布<span class="sec-sub">${rl}</span></div>${donut(byMuscleSets())}</section>`;
 }
 
@@ -478,6 +484,9 @@ function updatePreview(){
   const reps = done.reduce((s,r)=>s+(+r.reps||0),0);
   if(ed.eqMode==='bodyweight'){
     p.innerHTML = `${sets} <span>组</span> · ${reps} <span>次</span>`;
+  } else if(ed.eqMode==='assisted'){
+    const kg = done.reduce((s,r)=>s+(+r.weight||0),0);
+    p.innerHTML = `${sets} <span>组</span> · ${reps} <span>次</span> · <b>配重 ${fmtNum(kg)} kg</b>`;
   } else {
     const kg = done.reduce((s,r)=>s+(+r.reps||0)*(+r.weight||0),0);
     p.innerHTML = `${sets} <span>组</span> · ${reps} <span>次</span> · <b>${fmtNum(kg)} kg</b>`;
@@ -537,8 +546,8 @@ function renderModal(){
       const entry = DB.entries.find(x=>x.id===ed.entryId);
       const savedSets = entry?.sets?.length || 0;
       const savedReps = entry ? entry.sets.reduce((s,r)=>s+(+r.reps||0),0) : 0;
-      const savedKg = entry && ed.eqMode!=='bodyweight' ? entry.sets.reduce((s,r)=>s+(+r.reps||0)*(+r.weight||0),0) : 0;
-      banner = `<div class="inflight-banner">✓ 已记 ${savedSets} 组${ed.eqMode==='bodyweight'?` · ${savedReps} 次`:` · ${savedReps} 次 · ${fmtNum(savedKg)} kg`}</div>`;
+      const savedKg = entry && ed.eqMode==='weighted' ? entry.sets.reduce((s,r)=>s+(+r.reps||0)*(+r.weight||0),0) : 0;
+      banner = `<div class="inflight-banner">✓ 已记 ${savedSets} 组 · ${savedReps} 次${ed.eqMode==='weighted'?` · ${fmtNum(savedKg)} kg`:''}</div>`;
     }
     const fieldLbl = inflight ? '本组数据' : '训练组数据(可添加多组一次保存)';
     const actions = inflight
@@ -552,16 +561,18 @@ function renderModal(){
     body = `<div class="modal-head"><span>${isHistEdit?'编辑记录':'记录训练'}</span><button class="x" data-act="close">×</button></div>
       <div class="modal-body">
         <div class="ed-eq"><div>
-          <div class="ed-eq-name">${esc(q?.name||'?')} <span class="tag" style="--c:${groupColor(ed.muscle||'其他')}">${esc(ed.muscle||'其他')}</span> ${ed.eqMode==='bodyweight'?'<span class="tag" style="--c:#9aa0a6">自重</span>':''}</div>
+          <div class="ed-eq-name">${esc(q?.name||'?')} <span class="tag" style="--c:${groupColor(ed.muscle||'其他')}">${esc(ed.muscle||'其他')}</span> ${ed.eqMode==='bodyweight'?'<span class="tag" style="--c:#9aa0a6">自重</span>':''}${ed.eqMode==='assisted'?'<span class="tag" style="--c:#4ade80">配重</span>':''}</div>
         </div>${ed.mode==='new' || inflight ?`<button class="link" data-act="reset-eq">更换</button>`:''}</div>
         <label class="field"><span>日期</span><input type="date" id="ed-date" value="${ed.date}"></label>
         <div class="form-row"><span class="form-label">类型</span>
           <div class="seg">
             <button class="chip ${ed.eqMode==='weighted'?'on':''}" data-act="ed-mode" data-m="weighted">有重量</button>
             <button class="chip ${ed.eqMode==='bodyweight'?'on':''}" data-act="ed-mode" data-m="bodyweight">自重</button>
+            <button class="chip ${ed.eqMode==='assisted'?'on':''}" data-act="ed-mode" data-m="assisted">配重</button>
           </div>
         </div>
         <div class="field-label">${fieldLbl}</div>
+        ${ed.eqMode==='assisted'?`<div class="hint" style="margin-top:0">配重 kg · 数值越大越轻松(配重越小越进步)</div>`:''}
         <div class="sets" id="sets-list"></div>
         <button class="btn ghost sm add-set" data-act="add-set">+ 添加一组</button>
         <div class="preview" id="ed-preview"></div>

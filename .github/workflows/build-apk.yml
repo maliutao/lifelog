@@ -29,8 +29,23 @@ jobs:
         with:
           packages: 'platforms;android-34 build-tools;34.0.0'
 
+      - name: Restore signing keystore
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ -n "$ANDROID_DEBUG_KEYSTORE" ]; then
+            echo "$ANDROID_DEBUG_KEYSTORE" | base64 -d > "$HOME/.android/debug.keystore"
+          fi
+        env:
+          ANDROID_DEBUG_KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE }}
+
+      - name: Compute versionCode
+        id: vc
+        run: echo "versionCode=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Add Android platform
-        run: npx cap add android
+        run: |
+          npx cap add android
+          sed -i "s/versionCode 1$/versionCode ${{ steps.vc.outputs.versionCode }}/" android/app/build.gradle
 
       - name: Copy web assets into native project
         run: npx cap copy android
