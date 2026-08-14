@@ -653,13 +653,18 @@ function loadSamples(){
 }
 
 /* ---------- data menu ---------- */
-function exportData(){
+async function exportData(){
   const json = JSON.stringify(DB,null,2);
   const fname = `lifelog-${todayStr()}.json`;
-  /* Android WebView (Capacitor): use Web Share API */
-  if(window.Capacitor && navigator.canShare && navigator.canShare({files:[new File([new Blob([json],{type:'application/json'})],fname)]})){
-    const file = new File([new Blob([json],{type:'application/json'})], fname);
-    navigator.share({files:[file],title:'LIFELOG 备份'}).catch(()=>{});
+  /* Android (Capacitor): 原生写文件到缓存目录 + 系统分享面板 */
+  if(window.Capacitor?.isNativePlatform?.()){
+    try {
+      const { Filesystem, Share } = window.Capacitor.Plugins;
+      const { uri } = await Filesystem.writeFile({ path: fname, data: json, directory: 'CACHE', encoding: 'utf8' });
+      await Share.share({ title:'LIFELOG 备份', dialogTitle:'导出 LIFELOG 备份', files:[uri] });
+    } catch(e){
+      if(!String(e?.message||'').toLowerCase().includes('cancel')) toast('导出失败:' + (e?.message || '未知错误'));
+    }
     return;
   }
   /* Desktop / browser fallback: <a download> click */
@@ -667,7 +672,7 @@ function exportData(){
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = fname;
   document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(a.href);
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
 }
 function importData(e){
   const f = e.target.files[0]; if(!f) return;
